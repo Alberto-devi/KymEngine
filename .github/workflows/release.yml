@@ -83,16 +83,21 @@ jobs:
           java-version: '21'
 
       - name: Setup Vulkan SDK
-        uses: humbletim/setup-vulkan-sdk@v1.2.0
-        with:
-          vulkan-version: 1.3.280.0
-          vulkan-components: Vulkan-Headers,Vulkan-Loader,shaderc_combined
-          cache: true
+        shell: pwsh
+        run: |
+          $sdkVer = "1.3.280.0"
+          $sdkDir = "C:\VulkanSDK\$sdkVer"
+          $installer = "$env:TEMP\VulkanSDK.exe"
+          Invoke-WebRequest -Uri "https://sdk.lunarg.com/sdk/download/$sdkVer/windows/VulkanSDK-$sdkVer-Installer.exe" -OutFile $installer
+          Start-Process -FilePath $installer -ArgumentList "--root", $sdkDir, "--accept-licenses", "--default-answer", "--confirm-command", "install" -Wait
+          Remove-Item $installer -Force
+          "VULKAN_SDK=$sdkDir" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "$sdkDir\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append
 
       - name: Configure & Build
         shell: pwsh
         run: |
-          cmake -B build -G "Visual Studio 17 2022" -A x64
+          cmake -B build -A x64
           cmake --build build --config Release -j
 
       - name: Run unit tests

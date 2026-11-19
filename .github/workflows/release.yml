@@ -121,7 +121,15 @@ jobs:
             'start "" "KyumistEditor.exe" %*'
           ) | Set-Content -Encoding ASCII dist\KymEngine-windows-x64\KymEngine.bat
           Compress-Archive -Path dist\KymEngine-windows-x64 -DestinationPath KymEngine-windows-x64.zip
-          makensis /DVERSION=$tagVer /DDIST_DIR="$PWD\dist\KymEngine-windows-x64" /DOUT_FILE="$PWD\KymEngine-$tagVer-win64-setup.exe" packaging\windows\kymengine.nsi
+          $makensis = Get-Command makensis -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
+          if (-not $makensis -and (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe")) {
+            $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          }
+          if (-not $makensis) {
+            choco install nsis -y --no-progress | Out-Null
+            $makensis = "C:\Program Files (x86)\NSIS\makensis.exe"
+          }
+          & $makensis "/DVERSION=$tagVer" "/DDIST_DIR=$PWD\dist\KymEngine-windows-x64" "/DOUT_FILE=$PWD\KymEngine-$tagVer-win64-setup.exe" packaging\windows\kymengine.nsi
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4

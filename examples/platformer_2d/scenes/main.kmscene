@@ -1,0 +1,582 @@
+{
+  "entities": [
+    {
+      "camera": {
+        "farClip": 100.0,
+        "fov": 45.0,
+        "isOrthographic": true,
+        "nearClip": 0.10000000149011612,
+        "orthoSize": 9.0,
+        "primary": true
+      },
+      "tag": "Camara 2D",
+      "transform": {
+        "rotationDegrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          0.0,
+          1.5,
+          10.0
+        ]
+      }
+    },
+    {
+      "rigidBody": {
+        "angularVelocity": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bodyType": "Static",
+        "friction": 0.4000000059604645,
+        "halfExtents": [
+          8.0,
+          0.4000000059604645,
+          0.5
+        ],
+        "isTrigger": false,
+        "mass": 1.0,
+        "radius": 0.5,
+        "restitution": 0.0,
+        "shape": "Box2D",
+        "useGravity": true,
+        "velocity": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "spriteRenderer": {
+        "animFps": 0.0,
+        "checkerPattern": true,
+        "color": [
+          0.3199999928474426,
+          0.3799999952316284,
+          0.47999998927116394,
+          1.0
+        ],
+        "frameIndex": 0,
+        "hFrames": 1,
+        "sortingOrder": 0,
+        "texturePath": "",
+        "vFrames": 1,
+        "visible": true
+      },
+      "tag": "Suelo Base",
+      "transform": {
+        "rotationDegrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          16.0,
+          0.800000011920929,
+          1.0
+        ],
+        "translation": [
+          0.0,
+          -2.5,
+          0.0
+        ]
+      }
+    },
+    {
+      "rigidBody": {
+        "angularVelocity": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bodyType": "Static",
+        "friction": 0.30000001192092896,
+        "halfExtents": [
+          1.600000023841858,
+          0.25,
+          0.5
+        ],
+        "isTrigger": false,
+        "mass": 1.0,
+        "radius": 0.5,
+        "restitution": 0.0,
+        "shape": "Box2D",
+        "useGravity": true,
+        "velocity": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "spriteRenderer": {
+        "animFps": 0.0,
+        "checkerPattern": true,
+        "color": [
+          0.3499999940395355,
+          0.550000011920929,
+          0.8199999928474426,
+          1.0
+        ],
+        "frameIndex": 0,
+        "hFrames": 1,
+        "sortingOrder": 0,
+        "texturePath": "",
+        "vFrames": 1,
+        "visible": true
+      },
+      "tag": "Plat_Izquierda",
+      "transform": {
+        "rotationDegrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          3.200000047683716,
+          0.5,
+          1.0
+        ],
+        "translation": [
+          -4.0,
+          -0.5,
+          0.0
+        ]
+      }
+    },
+    {
+      "javaScript": {
+        "className": "MovingPlatform2DScript",
+        "enabled": true
+      },
+      "rigidBody": {
+        "angularVelocity": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bodyType": "Kinematic",
+        "friction": 0.30000001192092896,
+        "halfExtents": [
+          1.399999976158142,
+          0.22499999403953552,
+          0.5
+        ],
+        "isTrigger": false,
+        "mass": 1.0,
+        "radius": 0.5,
+        "restitution": 0.0,
+        "shape": "Box2D",
+        "useGravity": true,
+        "velocity": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "spriteRenderer": {
+        "animFps": 0.0,
+        "checkerPattern": false,
+        "color": [
+          0.9200000166893005,
+          0.6200000047683716,
+          0.2199999988079071,
+          1.0
+        ],
+        "frameIndex": 0,
+        "hFrames": 1,
+        "sortingOrder": 0,
+        "texturePath": "",
+        "vFrames": 1,
+        "visible": true
+      },
+      "tag": "Plat_Movil",
+      "transform": {
+        "rotationDegrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          2.799999952316284,
+          0.44999998807907104,
+          1.0
+        ],
+        "translation": [
+          0.0,
+          0.800000011920929,
+          0.0
+        ]
+      }
+    },
+    {
+      "rigidBody": {
+        "angularVelocity": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bodyType": "Static",
+        "friction": 0.30000001192092896,
+        "halfExtents": [
+          1.7000000476837158,
+          0.25,
+          0.5
+        ],
+        "isTrigger": false,
+        "mass": 1.0,
+        "radius": 0.5,
+        "restitution": 0.0,
+        "shape": "Box2D",
+        "useGravity": true,
+        "velocity": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "spriteRenderer": {
+        "animFps": 0.0,
+        "checkerPattern": true,
+        "color": [
+          0.3499999940395355,
+          0.7200000286102295,
+          0.550000011920929,
+          1.0
+        ],
+        "frameIndex": 0,
+        "hFrames": 1,
+        "sortingOrder": 0,
+        "texturePath": "",
+        "vFrames": 1,
+        "visible": true
+      },
+      "tag": "Plat_Derecha",
+      "transform": {
+        "rotationDegrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          3.4000000953674316,
+          0.5,
+          1.0
+        ],
+        "translation": [
+          4.199999809265137,
+          2.0999999046325684,
+          0.0
+        ]
+      }
+    },
+    {
+      "javaScript": {
+        "className": "CoinPickup2DScript",
+        "enabled": true
+      },
+      "rigidBody": {
+        "angularVelocity": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bodyType": "Kinematic",
+        "friction": 0.30000001192092896,
+        "halfExtents": [
+          0.3499999940395355,
+          0.3499999940395355,
+          0.5
+        ],
+        "isTrigger": true,
+        "mass": 1.0,
+        "radius": 0.5,
+        "restitution": 0.6000000238418579,
+        "shape": "Box2D",
+        "useGravity": true,
+        "velocity": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "spriteRenderer": {
+        "animFps": 8.0,
+        "checkerPattern": false,
+        "color": [
+          1.0,
+          0.9200000166893005,
+          0.25,
+          1.0
+        ],
+        "frameIndex": 0,
+        "hFrames": 4,
+        "sortingOrder": 0,
+        "texturePath": "textures/coin_spritesheet.png",
+        "vFrames": 1,
+        "visible": true
+      },
+      "tag": "Coin_1",
+      "transform": {
+        "rotationDegrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.75,
+          0.75,
+          1.0
+        ],
+        "translation": [
+          -4.0,
+          0.5,
+          0.0
+        ]
+      }
+    },
+    {
+      "javaScript": {
+        "className": "CoinPickup2DScript",
+        "enabled": true
+      },
+      "rigidBody": {
+        "angularVelocity": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bodyType": "Kinematic",
+        "friction": 0.30000001192092896,
+        "halfExtents": [
+          0.3499999940395355,
+          0.3499999940395355,
+          0.5
+        ],
+        "isTrigger": true,
+        "mass": 1.0,
+        "radius": 0.5,
+        "restitution": 0.6000000238418579,
+        "shape": "Box2D",
+        "useGravity": true,
+        "velocity": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "spriteRenderer": {
+        "animFps": 8.0,
+        "checkerPattern": false,
+        "color": [
+          1.0,
+          0.9200000166893005,
+          0.25,
+          1.0
+        ],
+        "frameIndex": 0,
+        "hFrames": 4,
+        "sortingOrder": 0,
+        "texturePath": "textures/coin_spritesheet.png",
+        "vFrames": 1,
+        "visible": true
+      },
+      "tag": "Coin_2",
+      "transform": {
+        "rotationDegrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.75,
+          0.75,
+          1.0
+        ],
+        "translation": [
+          0.0,
+          1.899999976158142,
+          0.0
+        ]
+      }
+    },
+    {
+      "javaScript": {
+        "className": "CoinPickup2DScript",
+        "enabled": true
+      },
+      "rigidBody": {
+        "angularVelocity": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bodyType": "Kinematic",
+        "friction": 0.30000001192092896,
+        "halfExtents": [
+          0.3499999940395355,
+          0.3499999940395355,
+          0.5
+        ],
+        "isTrigger": true,
+        "mass": 1.0,
+        "radius": 0.5,
+        "restitution": 0.6000000238418579,
+        "shape": "Box2D",
+        "useGravity": true,
+        "velocity": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "spriteRenderer": {
+        "animFps": 8.0,
+        "checkerPattern": false,
+        "color": [
+          1.0,
+          0.9200000166893005,
+          0.25,
+          1.0
+        ],
+        "frameIndex": 0,
+        "hFrames": 4,
+        "sortingOrder": 0,
+        "texturePath": "textures/coin_spritesheet.png",
+        "vFrames": 1,
+        "visible": true
+      },
+      "tag": "Coin_3",
+      "transform": {
+        "rotationDegrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.75,
+          0.75,
+          1.0
+        ],
+        "translation": [
+          4.199999809265137,
+          3.0999999046325684,
+          0.0
+        ]
+      }
+    },
+    {
+      "audioSource": {
+        "playOnBounce": false,
+        "playOnStart": false,
+        "soundPath": "audio/bounce.wav",
+        "volume": 0.800000011920929
+      },
+      "javaScript": {
+        "className": "PlatformerPlayerScript",
+        "enabled": true
+      },
+      "rigidBody": {
+        "angularVelocity": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bodyType": "Dynamic",
+        "friction": 0.30000001192092896,
+        "halfExtents": [
+          0.44999998807907104,
+          0.550000011920929,
+          0.5
+        ],
+        "isTrigger": false,
+        "mass": 1.0,
+        "radius": 0.5,
+        "restitution": 0.0,
+        "shape": "Box2D",
+        "useGravity": true,
+        "velocity": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "spriteRenderer": {
+        "animFps": 0.0,
+        "checkerPattern": false,
+        "color": [
+          0.25,
+          0.8799999952316284,
+          0.5199999809265137,
+          1.0
+        ],
+        "frameIndex": 0,
+        "hFrames": 1,
+        "sortingOrder": 5,
+        "texturePath": "textures/checker_albedo.png",
+        "vFrames": 1,
+        "visible": true
+      },
+      "tag": "Jugador 2D",
+      "transform": {
+        "rotationDegrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.8999999761581421,
+          1.100000023841858,
+          1.0
+        ],
+        "translation": [
+          -5.5,
+          -1.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "tag": "HUD_Platformer",
+      "transform": {
+        "rotationDegrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "uiText": {
+        "color": [
+          0.949999988079071,
+          0.9800000190734863,
+          1.0,
+          1.0
+        ],
+        "fontScale": 1.149999976158142,
+        "screenPos": [
+          22.0,
+          54.0
+        ],
+        "text": "SkyHop 2D | Monedas: 0/3 | A/D: Mover | Espacio/W: Saltar",
+        "visible": true
+      }
+    }
+  ],
+  "version": 2
+}

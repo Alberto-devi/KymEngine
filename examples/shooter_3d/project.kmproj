@@ -1,0 +1,6 @@
+{
+  "name": "Vortex Arena 3D",
+  "sampleRevision": 2,
+  "startScene": "scenes/main.kmscene",
+  "version": "0.1.0"
+}

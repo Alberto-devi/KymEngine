@@ -1,0 +1,6 @@
+{
+  "name": "SkyHop 2D",
+  "sampleRevision": 2,
+  "startScene": "scenes/main.kmscene",
+  "version": "0.1.0"
+}

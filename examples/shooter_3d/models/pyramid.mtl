@@ -1,0 +1,6 @@
+# Material de ejemplo Wavefront MTL
+newmtl PyramidGold
+Kd 0.94 0.74 0.25
+Ke 0.02 0.01 0.00
+Pm 0.80
+Pr 0.28

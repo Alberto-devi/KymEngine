@@ -1,0 +1,6 @@
+{
+  "name": "Aether Guardian",
+  "sampleRevision": 2,
+  "startScene": "scenes/main.kmscene",
+  "version": "0.1.0"
+}

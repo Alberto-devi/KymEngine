@@ -1,0 +1,252 @@
+{
+  "entities": [
+    {
+      "directionalLight": {
+        "color": [
+          1.0,
+          0.9800000190734863,
+          0.9200000166893005
+        ],
+        "intensity": 1.35
+      },
+      "skybox": {
+        "enabled": true,
+        "groundColor": [
+          0.34,
+          0.38,
+          0.44
+        ],
+        "horizonColor": [
+          0.64,
+          0.8,
+          0.96
+        ],
+        "zenithColor": [
+          0.24,
+          0.5,
+          0.86
+        ]
+      },
+      "tag": "Sol Direccional",
+      "transform": {
+        "rotationDegrees": [
+          -45.0,
+          -35.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          0.0,
+          4.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "javaScript": {
+        "className": "RotatorScript",
+        "enabled": true
+      },
+      "meshRenderer": {
+        "color": [
+          0.8999999761581421,
+          0.3199999928474426,
+          0.25,
+          1.0
+        ],
+        "metallic": 0.10000000149011612,
+        "objPath": "",
+        "roughness": 0.44999998807907104,
+        "type": "Cube",
+        "visible": true
+      },
+      "rigidBody": {
+        "bodyType": "Kinematic",
+        "friction": 0.30000001192092896,
+        "halfExtents": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "mass": 1.0,
+        "radius": 0.5,
+        "restitution": 0.6000000238418579,
+        "shape": "Box3D",
+        "useGravity": true,
+        "velocity": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "tag": "Cubo PBR",
+      "transform": {
+        "rotationDegrees": [
+          0.0,
+          25.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          -1.2000000476837158,
+          0.5,
+          0.0
+        ]
+      }
+    },
+    {
+      "audioSource": {
+        "playOnBounce": true,
+        "playOnStart": false,
+        "soundPath": "audio/bounce.wav",
+        "volume": 0.800000011920929
+      },
+      "meshRenderer": {
+        "color": [
+          0.25,
+          0.6499999761581421,
+          0.949999988079071,
+          1.0
+        ],
+        "metallic": 0.10000000149011612,
+        "objPath": "",
+        "roughness": 0.25,
+        "type": "Sphere",
+        "visible": true
+      },
+      "rigidBody": {
+        "bodyType": "Dynamic",
+        "friction": 0.30000001192092896,
+        "halfExtents": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "mass": 1.0,
+        "radius": 0.5,
+        "restitution": 0.75,
+        "shape": "Sphere3D",
+        "useGravity": true,
+        "velocity": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "tag": "Esfera PBR",
+      "transform": {
+        "rotationDegrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          1.2000000476837158,
+          2.4000000953674316,
+          0.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "color": [
+          0.48,
+          0.52,
+          0.58,
+          1.0
+        ],
+        "metallic": 0.10000000149011612,
+        "objPath": "",
+        "roughness": 0.8500000238418579,
+        "type": "Plane",
+        "visible": true
+      },
+      "rigidBody": {
+        "bodyType": "Static",
+        "friction": 0.30000001192092896,
+        "halfExtents": [
+          4.0,
+          0.05000000074505806,
+          4.0
+        ],
+        "mass": 1.0,
+        "radius": 0.5,
+        "restitution": 0.800000011920929,
+        "shape": "Box3D",
+        "useGravity": true,
+        "velocity": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "tag": "Suelo 3D",
+      "transform": {
+        "rotationDegrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          8.0,
+          1.0,
+          8.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "javaScript": {
+        "className": "Oscillator2DScript",
+        "enabled": true
+      },
+      "spriteRenderer": {
+        "checkerPattern": false,
+        "color": [
+          0.3499999940395355,
+          0.9200000166893005,
+          0.550000011920929,
+          1.0
+        ],
+        "sortingOrder": 0,
+        "visible": true
+      },
+      "tag": "Sprite 2D",
+      "transform": {
+        "rotationDegrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.2000000476837158,
+          1.2000000476837158,
+          1.0
+        ],
+        "translation": [
+          0.0,
+          1.7999999523162842,
+          -1.0
+        ]
+      }
+    }
+  ],
+  "version": 1
+}

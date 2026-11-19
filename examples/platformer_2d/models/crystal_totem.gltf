@@ -1,0 +1,175 @@
+{
+  "accessors": [
+    {
+      "bufferView": 0,
+      "componentType": 5126,
+      "count": 8,
+      "max": [
+        0.44999998807907104,
+        0.14000000059604645,
+        0.44999998807907104
+      ],
+      "min": [
+        -0.44999998807907104,
+        -0.14000000059604645,
+        -0.44999998807907104
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 1,
+      "componentType": 5123,
+      "count": 36,
+      "type": "SCALAR"
+    },
+    {
+      "bufferView": 2,
+      "componentType": 5126,
+      "count": 6,
+      "max": [
+        0.3799999952316284,
+        0.6200000047683716,
+        0.3799999952316284
+      ],
+      "min": [
+        -0.3799999952316284,
+        -0.6200000047683716,
+        -0.3799999952316284
+      ],
+      "type": "VEC3"
+    },
+    {
+      "bufferView": 3,
+      "componentType": 5123,
+      "count": 24,
+      "type": "SCALAR"
+    }
+  ],
+  "asset": {
+    "generator": "Kyumist Engine Exporter",
+    "version": "2.0"
+  },
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteLength": 96,
+      "byteOffset": 0,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 72,
+      "byteOffset": 96,
+      "target": 34963
+    },
+    {
+      "buffer": 0,
+      "byteLength": 72,
+      "byteOffset": 168,
+      "target": 34962
+    },
+    {
+      "buffer": 0,
+      "byteLength": 48,
+      "byteOffset": 240,
+      "target": 34963
+    }
+  ],
+  "buffers": [
+    {
+      "byteLength": 288,
+      "uri": "data:application/octet-stream;base64,ZmbmvilcD75mZuY+ZmbmPilcD75mZuY+ZmbmPilcDz5mZuY+ZmbmvilcDz5mZuY+ZmbmvilcD75mZua+ZmbmPilcD75mZua+ZmbmPilcDz5mZua+ZmbmvilcDz5mZua+AAABAAIAAgADAAAAAQAFAAYABgACAAEABQAEAAcABwAGAAUABAAAAAMAAwAHAAQAAwACAAYABgAHAAMABAAFAAEAAQAAAAQAAAAAAFK4Hj8AAAAAXI/CPgAAAAAAAAAAAAAAAAAAAABcj8I+XI/CvgAAAAAAAAAAAAAAAAAAAABcj8K+AAAAAFK4Hr8AAAAAAAACAAEAAAADAAIAAAAEAAMAAAABAAQABQABAAIABQACAAMABQADAAQABQAEAAEA"
+    }
+  ],
+  "materials": [
+    {
+      "emissiveFactor": [
+        0.05000000074505806,
+        0.18000000715255737,
+        0.23999999463558197
+      ],
+      "name": "CyanCrystalPBR",
+      "pbrMetallicRoughness": {
+        "baseColorFactor": [
+          0.2199999988079071,
+          0.8600000143051147,
+          0.9599999785423279,
+          1.0
+        ],
+        "metallicFactor": 0.7200000286102295,
+        "roughnessFactor": 0.18000000715255737
+      }
+    },
+    {
+      "name": "BrushedGoldPedestal",
+      "pbrMetallicRoughness": {
+        "baseColorFactor": [
+          0.9200000166893005,
+          0.7200000286102295,
+          0.23999999463558197,
+          1.0
+        ],
+        "metallicFactor": 0.8500000238418579,
+        "roughnessFactor": 0.30000001192092896
+      }
+    }
+  ],
+  "meshes": [
+    {
+      "name": "PedestalMesh",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 0
+          },
+          "indices": 1,
+          "material": 1
+        }
+      ]
+    },
+    {
+      "name": "CrystalMesh",
+      "primitives": [
+        {
+          "attributes": {
+            "POSITION": 2
+          },
+          "indices": 3,
+          "material": 0
+        }
+      ]
+    }
+  ],
+  "nodes": [
+    {
+      "children": [
+        1
+      ],
+      "mesh": 0,
+      "name": "Pedestal",
+      "translation": [
+        0.0,
+        0.14000000059604645,
+        0.0
+      ]
+    },
+    {
+      "mesh": 1,
+      "name": "FloatingCrystal",
+      "translation": [
+        0.0,
+        0.8500000238418579,
+        0.0
+      ]
+    }
+  ],
+  "scene": 0,
+  "scenes": [
+    {
+      "name": "CrystalTotemScene",
+      "nodes": [
+        0
+      ]
+    }
+  ]
+}

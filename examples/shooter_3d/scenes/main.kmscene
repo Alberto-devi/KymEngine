@@ -1,0 +1,838 @@
+{
+  "entities": [
+    {
+      "directionalLight": {
+        "color": [
+          1.0,
+          0.9800000190734863,
+          0.9200000166893005
+        ],
+        "intensity": 1.350000023841858
+      },
+      "skybox": {
+        "enabled": true,
+        "groundColor": [
+          0.2800000011920929,
+          0.3199999928474426,
+          0.3799999952316284
+        ],
+        "horizonColor": [
+          0.550000011920929,
+          0.7400000095367432,
+          0.9200000166893005
+        ],
+        "zenithColor": [
+          0.18000000715255737,
+          0.3799999952316284,
+          0.7200000286102295
+        ]
+      },
+      "tag": "Sol Arena",
+      "transform": {
+        "rotationDegrees": [
+          -48.0,
+          -32.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          0.0,
+          8.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "pointLight": {
+        "color": [
+          0.4000000059604645,
+          0.8500000238418579,
+          1.0
+        ],
+        "intensity": 2.4000000953674316,
+        "range": 14.0
+      },
+      "tag": "Luz Central",
+      "transform": {
+        "rotationDegrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          0.0,
+          3.200000047683716,
+          0.0
+        ]
+      }
+    },
+    {
+      "camera": {
+        "farClip": 100.0,
+        "fov": 50.0,
+        "isOrthographic": false,
+        "nearClip": 0.10000000149011612,
+        "orthoSize": 5.0,
+        "primary": true
+      },
+      "tag": "Camara Arena",
+      "transform": {
+        "rotationDegrees": [
+          -40.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          0.0,
+          10.5,
+          13.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "color": [
+          0.4399999976158142,
+          0.5,
+          0.5799999833106995,
+          1.0
+        ],
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "materialPath": "",
+        "metallic": 0.10000000149011612,
+        "objPath": "",
+        "roughness": 0.75,
+        "texturePath": "textures/checker_albedo.png",
+        "type": "Plane",
+        "visible": true
+      },
+      "rigidBody": {
+        "angularVelocity": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bodyType": "Static",
+        "friction": 0.30000001192092896,
+        "halfExtents": [
+          9.0,
+          0.05000000074505806,
+          9.0
+        ],
+        "isTrigger": false,
+        "mass": 1.0,
+        "radius": 0.5,
+        "restitution": 0.6000000238418579,
+        "shape": "Box3D",
+        "useGravity": true,
+        "velocity": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "tag": "Suelo Arena",
+      "transform": {
+        "rotationDegrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          18.0,
+          1.0,
+          18.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "color": [
+          0.3400000035762787,
+          0.4000000059604645,
+          0.5199999809265137,
+          1.0
+        ],
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "materialPath": "",
+        "metallic": 0.10000000149011612,
+        "objPath": "",
+        "roughness": 0.6000000238418579,
+        "texturePath": "",
+        "type": "Cube",
+        "visible": true
+      },
+      "rigidBody": {
+        "angularVelocity": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bodyType": "Static",
+        "friction": 0.30000001192092896,
+        "halfExtents": [
+          0.550000011920929,
+          0.8999999761581421,
+          0.550000011920929
+        ],
+        "isTrigger": false,
+        "mass": 1.0,
+        "radius": 0.5,
+        "restitution": 0.6000000238418579,
+        "shape": "Box3D",
+        "useGravity": true,
+        "velocity": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "tag": "Pilar_1",
+      "transform": {
+        "rotationDegrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.100000023841858,
+          1.7999999523162842,
+          1.100000023841858
+        ],
+        "translation": [
+          -4.0,
+          0.8999999761581421,
+          -0.5
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "color": [
+          0.3400000035762787,
+          0.4000000059604645,
+          0.5199999809265137,
+          1.0
+        ],
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "materialPath": "",
+        "metallic": 0.10000000149011612,
+        "objPath": "",
+        "roughness": 0.6000000238418579,
+        "texturePath": "",
+        "type": "Cube",
+        "visible": true
+      },
+      "rigidBody": {
+        "angularVelocity": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bodyType": "Static",
+        "friction": 0.30000001192092896,
+        "halfExtents": [
+          0.550000011920929,
+          0.8999999761581421,
+          0.550000011920929
+        ],
+        "isTrigger": false,
+        "mass": 1.0,
+        "radius": 0.5,
+        "restitution": 0.6000000238418579,
+        "shape": "Box3D",
+        "useGravity": true,
+        "velocity": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "tag": "Pilar_2",
+      "transform": {
+        "rotationDegrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.100000023841858,
+          1.7999999523162842,
+          1.100000023841858
+        ],
+        "translation": [
+          4.0,
+          0.8999999761581421,
+          -0.5
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "color": [
+          0.3400000035762787,
+          0.4000000059604645,
+          0.5199999809265137,
+          1.0
+        ],
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "materialPath": "",
+        "metallic": 0.10000000149011612,
+        "objPath": "",
+        "roughness": 0.6000000238418579,
+        "texturePath": "",
+        "type": "Cube",
+        "visible": true
+      },
+      "rigidBody": {
+        "angularVelocity": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bodyType": "Static",
+        "friction": 0.30000001192092896,
+        "halfExtents": [
+          0.550000011920929,
+          0.8999999761581421,
+          0.550000011920929
+        ],
+        "isTrigger": false,
+        "mass": 1.0,
+        "radius": 0.5,
+        "restitution": 0.6000000238418579,
+        "shape": "Box3D",
+        "useGravity": true,
+        "velocity": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "tag": "Pilar_3",
+      "transform": {
+        "rotationDegrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.100000023841858,
+          1.7999999523162842,
+          1.100000023841858
+        ],
+        "translation": [
+          -4.0,
+          0.8999999761581421,
+          3.5
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": true,
+        "color": [
+          0.3400000035762787,
+          0.4000000059604645,
+          0.5199999809265137,
+          1.0
+        ],
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "materialPath": "",
+        "metallic": 0.10000000149011612,
+        "objPath": "",
+        "roughness": 0.6000000238418579,
+        "texturePath": "",
+        "type": "Cube",
+        "visible": true
+      },
+      "rigidBody": {
+        "angularVelocity": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bodyType": "Static",
+        "friction": 0.30000001192092896,
+        "halfExtents": [
+          0.550000011920929,
+          0.8999999761581421,
+          0.550000011920929
+        ],
+        "isTrigger": false,
+        "mass": 1.0,
+        "radius": 0.5,
+        "restitution": 0.6000000238418579,
+        "shape": "Box3D",
+        "useGravity": true,
+        "velocity": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "tag": "Pilar_4",
+      "transform": {
+        "rotationDegrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.100000023841858,
+          1.7999999523162842,
+          1.100000023841858
+        ],
+        "translation": [
+          4.0,
+          0.8999999761581421,
+          3.5
+        ]
+      }
+    },
+    {
+      "javaScript": {
+        "className": "ShooterPlayer3DScript",
+        "enabled": true
+      },
+      "meshRenderer": {
+        "castShadows": true,
+        "color": [
+          0.20000000298023224,
+          0.7200000286102295,
+          0.9599999785423279,
+          1.0
+        ],
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "materialPath": "",
+        "metallic": 0.3499999940395355,
+        "objPath": "",
+        "roughness": 0.3499999940395355,
+        "texturePath": "",
+        "type": "Cube",
+        "visible": true
+      },
+      "rigidBody": {
+        "angularVelocity": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "bodyType": "Kinematic",
+        "friction": 0.30000001192092896,
+        "halfExtents": [
+          0.550000011920929,
+          0.3499999940395355,
+          0.6499999761581421
+        ],
+        "isTrigger": false,
+        "mass": 1.0,
+        "radius": 0.5,
+        "restitution": 0.6000000238418579,
+        "shape": "Box3D",
+        "useGravity": true,
+        "velocity": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "tag": "Jugador",
+      "transform": {
+        "rotationDegrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.100000023841858,
+          0.699999988079071,
+          1.2999999523162842
+        ],
+        "translation": [
+          0.0,
+          0.550000011920929,
+          4.5
+        ]
+      }
+    },
+    {
+      "hierarchy": {
+        "parentTag": "Jugador"
+      },
+      "meshRenderer": {
+        "castShadows": true,
+        "color": [
+          0.8500000238418579,
+          0.8999999761581421,
+          0.9800000190734863,
+          1.0
+        ],
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "materialPath": "",
+        "metallic": 0.800000011920929,
+        "objPath": "",
+        "roughness": 0.20000000298023224,
+        "texturePath": "",
+        "type": "Cube",
+        "visible": true
+      },
+      "tag": "Canon_Torreta",
+      "transform": {
+        "rotationDegrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.30000001192092896,
+          0.2800000011920929,
+          1.100000023841858
+        ],
+        "translation": [
+          0.0,
+          0.25,
+          -0.75
+        ]
+      }
+    },
+    {
+      "meshRenderer": {
+        "castShadows": false,
+        "color": [
+          0.25,
+          0.9800000190734863,
+          1.0,
+          1.0
+        ],
+        "emissive": [
+          0.4000000059604645,
+          1.0,
+          1.0
+        ],
+        "materialPath": "",
+        "metallic": 0.10000000149011612,
+        "objPath": "",
+        "roughness": 0.5,
+        "texturePath": "",
+        "type": "Cube",
+        "visible": true
+      },
+      "tag": "LaserBeam",
+      "transform": {
+        "rotationDegrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          0.14000000059604645,
+          0.14000000059604645,
+          4.199999809265137
+        ],
+        "translation": [
+          0.0,
+          -50.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "javaScript": {
+        "className": "EnemyDrone3DScript",
+        "enabled": true
+      },
+      "meshRenderer": {
+        "castShadows": true,
+        "color": [
+          0.949999988079071,
+          0.2800000011920929,
+          0.25999999046325684,
+          1.0
+        ],
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "materialPath": "",
+        "metallic": 0.10000000149011612,
+        "objPath": "",
+        "roughness": 0.30000001192092896,
+        "texturePath": "",
+        "type": "Cube",
+        "visible": true
+      },
+      "rigidBody": {
+        "angularVelocity": [
+          0.0,
+          75.0,
+          0.0
+        ],
+        "bodyType": "Kinematic",
+        "friction": 0.30000001192092896,
+        "halfExtents": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "isTrigger": false,
+        "mass": 1.0,
+        "radius": 0.6499999761581421,
+        "restitution": 0.6000000238418579,
+        "shape": "Sphere3D",
+        "useGravity": true,
+        "velocity": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "tag": "Dron_1",
+      "transform": {
+        "rotationDegrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          -4.5,
+          0.8999999761581421,
+          -3.5
+        ]
+      }
+    },
+    {
+      "javaScript": {
+        "className": "EnemyDrone3DScript",
+        "enabled": true
+      },
+      "meshRenderer": {
+        "castShadows": true,
+        "color": [
+          0.9800000190734863,
+          0.5799999833106995,
+          0.18000000715255737,
+          1.0
+        ],
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "materialPath": "",
+        "metallic": 0.10000000149011612,
+        "objPath": "",
+        "roughness": 0.30000001192092896,
+        "texturePath": "",
+        "type": "Sphere",
+        "visible": true
+      },
+      "rigidBody": {
+        "angularVelocity": [
+          0.0,
+          75.0,
+          0.0
+        ],
+        "bodyType": "Kinematic",
+        "friction": 0.30000001192092896,
+        "halfExtents": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "isTrigger": false,
+        "mass": 1.0,
+        "radius": 0.6499999761581421,
+        "restitution": 0.6000000238418579,
+        "shape": "Sphere3D",
+        "useGravity": true,
+        "velocity": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "tag": "Dron_2",
+      "transform": {
+        "rotationDegrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          0.0,
+          0.949999988079071,
+          -5.5
+        ]
+      }
+    },
+    {
+      "javaScript": {
+        "className": "EnemyDrone3DScript",
+        "enabled": true
+      },
+      "meshRenderer": {
+        "castShadows": true,
+        "color": [
+          0.7200000286102295,
+          0.36000001430511475,
+          0.9800000190734863,
+          1.0
+        ],
+        "emissive": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "materialPath": "",
+        "metallic": 0.10000000149011612,
+        "objPath": "models/pyramid.obj",
+        "roughness": 0.30000001192092896,
+        "texturePath": "",
+        "type": "CustomOBJ",
+        "visible": true
+      },
+      "rigidBody": {
+        "angularVelocity": [
+          0.0,
+          75.0,
+          0.0
+        ],
+        "bodyType": "Kinematic",
+        "friction": 0.30000001192092896,
+        "halfExtents": [
+          0.5,
+          0.5,
+          0.5
+        ],
+        "isTrigger": false,
+        "mass": 1.0,
+        "radius": 0.6499999761581421,
+        "restitution": 0.6000000238418579,
+        "shape": "Sphere3D",
+        "useGravity": true,
+        "velocity": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "tag": "Dron_3",
+      "transform": {
+        "rotationDegrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          4.5,
+          0.949999988079071,
+          -3.5
+        ]
+      }
+    },
+    {
+      "tag": "HUD_Shooter",
+      "transform": {
+        "rotationDegrees": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "scale": [
+          1.0,
+          1.0,
+          1.0
+        ],
+        "translation": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "uiText": {
+        "color": [
+          0.949999988079071,
+          0.9800000190734863,
+          1.0,
+          1.0
+        ],
+        "fontScale": 1.149999976158142,
+        "screenPos": [
+          22.0,
+          54.0
+        ],
+        "text": "Vortex Arena 3D | Vidas: 3 | Bajas: 0 | WASD: Mover | Q/E: Girar | Espacio/Clic: Disparar",
+        "visible": true
+      }
+    }
+  ],
+  "version": 2
+}

@@ -9,6 +9,7 @@ target_link_libraries(KymEngineHub PRIVATE
 )
 
 if(WIN32)
+    target_link_libraries(KymEngineHub PRIVATE shell32)
     set_target_properties(KymEngineHub PROPERTIES
         WIN32_EXECUTABLE FALSE
     )

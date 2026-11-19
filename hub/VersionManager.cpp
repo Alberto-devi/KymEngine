@@ -17,6 +17,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <shellapi.h>
 #else
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -977,31 +978,27 @@ bool VersionManager::DownloadAndApplyHubUpdate(
     }
 
 #ifdef _WIN32
-    STARTUPINFOW si{};
-    si.cb = sizeof(si);
-    PROCESS_INFORMATION pi{};
-    std::wstring cmdLine = QuoteArgW(targetFile.wstring());
-    const BOOL ok = ::CreateProcessW(
-        targetFile.wstring().c_str(),
-        cmdLine.data(),
-        nullptr,
-        nullptr,
-        FALSE,
-        CREATE_NEW_PROCESS_GROUP,
-        nullptr,
-        downloadDir.wstring().c_str(),
-        &si,
-        &pi
-    );
-    if (!ok) {
+    SHELLEXECUTEINFOW sei{};
+    sei.cbSize = sizeof(sei);
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+    sei.lpVerb = L"open";
+    const std::wstring exeW = targetFile.wstring();
+    const std::wstring dirW = downloadDir.wstring();
+    sei.lpFile = exeW.c_str();
+    sei.lpDirectory = dirW.c_str();
+    sei.nShow = SW_SHOWNORMAL;
+
+    if (!::ShellExecuteExW(&sei)) {
         if (outError) {
             *outError = "Instalador descargado en " + PlatformPaths::PathToUtf8(targetFile) +
-                        ", pero no se pudo abrir automaticamente.";
+                        ", pero no se pudo abrir automaticamente (error " +
+                        std::to_string(::GetLastError()) + ").";
         }
         return false;
     }
-    ::CloseHandle(pi.hProcess);
-    ::CloseHandle(pi.hThread);
+    if (sei.hProcess) {
+        ::CloseHandle(sei.hProcess);
+    }
     if (outShouldCloseHub) {
         *outShouldCloseHub = true;
     }

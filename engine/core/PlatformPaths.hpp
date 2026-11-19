@@ -155,5 +155,16 @@ inline std::filesystem::path ResolveJavaApiJar() {
 #endif
 }
 
+inline std::string PathToUtf8(const std::filesystem::path& path) {
+    const std::u8string u8 = path.u8string();
+    return std::string(reinterpret_cast<const char*>(u8.data()), u8.size());
+}
+
+inline std::filesystem::path Utf8ToPath(const std::string& utf8) {
+    return std::filesystem::path(
+        std::u8string(reinterpret_cast<const char8_t*>(utf8.data()), utf8.size())
+    );
+}
+
 } // namespace Kyumist::PlatformPaths
 

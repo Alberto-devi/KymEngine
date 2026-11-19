@@ -142,9 +142,13 @@ void SaveRecentProjects() {
         });
     }
 
-    std::ofstream out(recentsFile);
-    if (out.is_open()) {
-        out << root.dump(2) << '\n';
+    try {
+        std::ofstream out(recentsFile);
+        if (out.is_open()) {
+            out << root.dump(2) << '\n';
+        }
+    } catch (const std::exception& ex) {
+        KM_CORE_WARN("Unable to save recent projects JSON: {}", ex.what());
     }
 }
 
@@ -155,7 +159,7 @@ void RegisterRecentProject(const std::string& name, const std::filesystem::path&
     }
     std::error_code ec;
     const std::filesystem::path absPath = std::filesystem::weakly_canonical(projectFile, ec);
-    const std::string pathStr = ec ? projectFile.string() : absPath.string();
+    const std::string pathStr = PlatformPaths::PathToUtf8(ec ? projectFile : absPath);
 
     s_Proj.recents.erase(
         std::remove_if(s_Proj.recents.begin(), s_Proj.recents.end(), [&](const RecentProjectEntry& e) {

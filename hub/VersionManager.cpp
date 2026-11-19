@@ -449,6 +449,21 @@ bool VersionManager::UninstallEditor(const std::string& version, std::string* ou
     return true;
 }
 
+#ifdef _WIN32
+std::wstring QuoteArgW(const std::wstring& arg) {
+    std::wstring out = L"\"";
+    for (wchar_t c : arg) {
+        if (c == L'"') {
+            out += L"\\\"";
+        } else {
+            out += c;
+        }
+    }
+    out += L'"';
+    return out;
+}
+#endif
+
 bool VersionManager::LaunchEditor(
     const std::filesystem::path& editorExe,
     const std::filesystem::path& projectFile,
@@ -457,7 +472,7 @@ bool VersionManager::LaunchEditor(
     std::error_code ec;
     if (!std::filesystem::exists(editorExe, ec)) {
         if (outError) {
-            *outError = "No se encuentra el ejecutable del editor: " + editorExe.string();
+            *outError = "No se encuentra el ejecutable del editor: " + PlatformPaths::PathToUtf8(editorExe);
         }
         return false;
     }
@@ -465,31 +480,73 @@ bool VersionManager::LaunchEditor(
     const std::filesystem::path workDir = editorExe.parent_path();
 
 #ifdef _WIN32
-    std::string cmdLine = QuoteArg(editorExe.string());
+    std::wstring cmdLine = QuoteArgW(editorExe.wstring());
     if (!projectFile.empty()) {
-        cmdLine += " --project " + QuoteArg(projectFile.string());
+        cmdLine += L" --project " + QuoteArgW(projectFile.wstring());
     }
-    STARTUPINFOA si{};
+
+    const std::filesystem::path logFile = PlatformPaths::GetUserDataDir() / "last_editor_launch.log";
+    std::filesystem::create_directories(logFile.parent_path(), ec);
+    SECURITY_ATTRIBUTES sa{};
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    HANDLE hLog = ::CreateFileW(
+        logFile.wstring().c_str(),
+        GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        &sa,
+        CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        nullptr
+    );
+
+    STARTUPINFOW si{};
     si.cb = sizeof(si);
+    if (hLog != INVALID_HANDLE_VALUE) {
+        si.dwFlags |= STARTF_USESTDHANDLES;
+        si.hStdOutput = hLog;
+        si.hStdError = hLog;
+        si.hStdInput = nullptr;
+    }
     PROCESS_INFORMATION pi{};
-    const BOOL ok = ::CreateProcessA(
-        nullptr,
+    const BOOL ok = ::CreateProcessW(
+        editorExe.wstring().c_str(),
         cmdLine.data(),
         nullptr,
         nullptr,
-        FALSE,
-        DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+        hLog != INVALID_HANDLE_VALUE ? TRUE : FALSE,
+        CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
         nullptr,
-        workDir.string().c_str(),
+        workDir.wstring().c_str(),
         &si,
         &pi
     );
+    if (hLog != INVALID_HANDLE_VALUE) {
+        ::CloseHandle(hLog);
+    }
     if (!ok) {
         if (outError) {
             *outError = "No se pudo iniciar KyumistEditor.exe (Windows error " + std::to_string(::GetLastError()) + ").";
         }
         return false;
     }
+
+    const DWORD waitRes = ::WaitForSingleObject(pi.hProcess, 250);
+    if (waitRes == WAIT_OBJECT_0) {
+        DWORD exitCode = 1;
+        ::GetExitCodeProcess(pi.hProcess, &exitCode);
+        ::CloseHandle(pi.hProcess);
+        ::CloseHandle(pi.hThread);
+        if (exitCode != 0) {
+            if (outError) {
+                *outError = "KyumistEditor.exe se cerro al iniciar (codigo " + std::to_string(exitCode) +
+                            "). Revisa: " + PlatformPaths::PathToUtf8(logFile);
+            }
+            return false;
+        }
+        return true;
+    }
+
     ::CloseHandle(pi.hProcess);
     ::CloseHandle(pi.hThread);
     return true;
@@ -551,7 +608,7 @@ std::vector<HubProjectEntry> VersionManager::LoadProjects() {
                 if (pathStr.empty()) {
                     continue;
                 }
-                const std::filesystem::path projFile(pathStr);
+                const std::filesystem::path projFile = PlatformPaths::Utf8ToPath(pathStr);
                 const bool duplicate = std::any_of(projects.begin(), projects.end(), [&](const HubProjectEntry& p) {
                     return p.projectFile == projFile;
                 });
@@ -560,7 +617,7 @@ std::vector<HubProjectEntry> VersionManager::LoadProjects() {
                 }
 
                 HubProjectEntry entry;
-                entry.name = item.value("name", projFile.parent_path().filename().string());
+                entry.name = item.value("name", PlatformPaths::PathToUtf8(projFile.parent_path().filename()));
                 entry.projectFile = projFile;
                 entry.fileExists = std::filesystem::exists(projFile, ec);
                 entry.engineVersion = KM_ENGINE_VERSION;
@@ -598,15 +655,16 @@ bool VersionManager::AddProject(const std::filesystem::path& projectFileOrDir, s
     }
     if (!std::filesystem::exists(projFile, ec)) {
         if (outError) {
-            *outError = "No se encontro project.kmproj en: " + projFile.string();
+            *outError = "No se encontro project.kmproj en: " + PlatformPaths::PathToUtf8(projFile);
         }
         return false;
     }
 
     const std::filesystem::path canon = std::filesystem::weakly_canonical(projFile, ec);
     const std::filesystem::path resolved = ec ? projFile : canon;
+    const std::string resolvedUtf8 = PlatformPaths::PathToUtf8(resolved);
 
-    std::string projName = resolved.parent_path().filename().string();
+    std::string projName = PlatformPaths::PathToUtf8(resolved.parent_path().filename());
     std::ifstream pin(resolved);
     if (pin.is_open()) {
         try {
@@ -634,24 +692,31 @@ bool VersionManager::AddProject(const std::filesystem::path& projectFileOrDir, s
     }
 
     nlohmann::json updated = nlohmann::json::array();
-    updated.push_back({{"name", projName}, {"path", resolved.string()}});
+    updated.push_back({{"name", projName}, {"path", resolvedUtf8}});
     if (root.contains("projects") && root["projects"].is_array()) {
         for (const auto& item : root["projects"]) {
-            if (item.value("path", "") != resolved.string()) {
+            if (item.value("path", "") != resolvedUtf8) {
                 updated.push_back(item);
             }
         }
     }
     root["projects"] = updated;
 
-    std::ofstream out(regFile, std::ios::trunc);
-    if (!out.is_open()) {
+    try {
+        std::ofstream out(regFile, std::ios::trunc);
+        if (!out.is_open()) {
+            if (outError) {
+                *outError = "No se pudo guardar el registro de proyectos.";
+            }
+            return false;
+        }
+        out << root.dump(2) << '\n';
+    } catch (const std::exception& ex) {
         if (outError) {
-            *outError = "No se pudo guardar el registro de proyectos.";
+            *outError = std::string("Error al guardar el registro: ") + ex.what();
         }
         return false;
     }
-    out << root.dump(2) << '\n';
     return true;
 }
 
@@ -676,16 +741,20 @@ void VersionManager::RemoveProject(const std::filesystem::path& projectFile) {
     if (!root.contains("projects") || !root["projects"].is_array()) {
         return;
     }
+    const std::string targetUtf8 = PlatformPaths::PathToUtf8(projectFile);
     nlohmann::json filtered = nlohmann::json::array();
     for (const auto& item : root["projects"]) {
-        if (item.value("path", "") != projectFile.string()) {
+        if (item.value("path", "") != targetUtf8) {
             filtered.push_back(item);
         }
     }
     root["projects"] = filtered;
-    std::ofstream out(regFile, std::ios::trunc);
-    if (out.is_open()) {
-        out << root.dump(2) << '\n';
+    try {
+        std::ofstream out(regFile, std::ios::trunc);
+        if (out.is_open()) {
+            out << root.dump(2) << '\n';
+        }
+    } catch (const std::exception&) {
     }
 }
 

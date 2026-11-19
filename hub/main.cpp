@@ -64,7 +64,7 @@ protected:
     void OnInit() override {
         RefreshLocalState();
 
-        const std::string defParent = GetDefaultProjectsParentDir().string();
+        const std::string defParent = Kyumist::PlatformPaths::PathToUtf8(GetDefaultProjectsParentDir());
         std::strncpy(m_NewProjectParent.data(), defParent.c_str(), m_NewProjectParent.size() - 1);
         std::strncpy(m_NewProjectName.data(), "MiProyecto", m_NewProjectName.size() - 1);
 
@@ -203,7 +203,7 @@ private:
 
     void TryOpenProject(const Kyumist::Hub::HubProjectEntry& proj) {
         if (!proj.fileExists) {
-            m_StatusMessage = "No existe el archivo: " + proj.projectFile.string();
+            m_StatusMessage = "No existe el archivo: " + Kyumist::PlatformPaths::PathToUtf8(proj.projectFile);
             return;
         }
         const auto* ed = Kyumist::Hub::VersionManager::FindInstalledVersion(m_Installed, proj.engineVersion);
@@ -318,7 +318,7 @@ private:
 
                 ImGui::TableSetColumnIndex(0);
                 ImGui::TextUnformatted(proj.name.c_str());
-                ImGui::TextDisabled("%s", proj.projectFile.parent_path().string().c_str());
+                ImGui::TextDisabled("%s", Kyumist::PlatformPaths::PathToUtf8(proj.projectFile.parent_path()).c_str());
 
                 ImGui::TableSetColumnIndex(1);
                 ImGui::Text("v%s", proj.engineVersion.c_str());
@@ -367,7 +367,7 @@ private:
         if (ImGui::Button("Refrescar")) {
             RefreshLocalState();
         }
-        ImGui::TextDisabled("Carpeta: %s", Kyumist::Hub::VersionManager::GetEditorsRootDir().string().c_str());
+        ImGui::TextDisabled("Carpeta: %s", Kyumist::PlatformPaths::PathToUtf8(Kyumist::Hub::VersionManager::GetEditorsRootDir()).c_str());
         ImGui::Separator();
 
         if (m_Installed.empty()) {
@@ -389,7 +389,7 @@ private:
                 ImGui::TableSetColumnIndex(1);
                 ImGui::TextUnformatted(ed.isBundled ? "Incluida" : ChannelLabel(ed.channel));
                 ImGui::TableSetColumnIndex(2);
-                ImGui::TextDisabled("%s", ed.executablePath.string().c_str());
+                ImGui::TextDisabled("%s", Kyumist::PlatformPaths::PathToUtf8(ed.executablePath).c_str());
                 ImGui::TableSetColumnIndex(3);
                 if (ed.isBundled) {
                     ImGui::TextDisabled("Base");
@@ -516,16 +516,20 @@ private:
         ImGui::BeginDisabled(m_Installed.empty());
         if (ImGui::Button("Crear y Abrir", ImVec2(130.0f, 0.0f))) {
             std::string err;
-            const std::filesystem::path parentDir(m_NewProjectParent.data());
+            const std::filesystem::path parentDir = Kyumist::PlatformPaths::Utf8ToPath(m_NewProjectParent.data());
             const std::string projName(m_NewProjectName.data());
             if (Kyumist::ProjectManager::CreateNewProject(parentDir, projName, m_NewProjectTemplateIdx, &err)) {
-                const std::filesystem::path projFile = parentDir / projName / "project.kmproj";
+                const std::filesystem::path projFile = parentDir / Kyumist::PlatformPaths::Utf8ToPath(projName) / "project.kmproj";
                 const auto& chosenEd = m_Installed[m_NewProjectEditorIdx];
                 Kyumist::Hub::VersionManager::UpdateProjectEngineVersion(projFile, chosenEd.version);
-                Kyumist::Hub::VersionManager::AddProject(projFile);
+                Kyumist::Hub::VersionManager::AddProject(projFile, &err);
                 RefreshLocalState();
-                Kyumist::Hub::VersionManager::LaunchEditor(chosenEd.executablePath, projFile, &err);
-                m_StatusMessage = err.empty() ? ("Proyecto '" + projName + "' creado.") : err;
+                std::string launchErr;
+                if (!Kyumist::Hub::VersionManager::LaunchEditor(chosenEd.executablePath, projFile, &launchErr)) {
+                    m_StatusMessage = launchErr;
+                } else {
+                    m_StatusMessage = err.empty() ? ("Proyecto '" + projName + "' creado.") : err;
+                }
                 ImGui::CloseCurrentPopup();
             } else {
                 m_StatusMessage = err;
@@ -553,7 +557,7 @@ private:
 
         if (ImGui::Button("Anadir", ImVec2(110.0f, 0.0f))) {
             std::string err;
-            if (Kyumist::Hub::VersionManager::AddProject(m_AddExistingPath.data(), &err)) {
+            if (Kyumist::Hub::VersionManager::AddProject(Kyumist::PlatformPaths::Utf8ToPath(m_AddExistingPath.data()), &err)) {
                 RefreshLocalState();
                 m_StatusMessage = "Proyecto anadido al Hub.";
                 ImGui::CloseCurrentPopup();

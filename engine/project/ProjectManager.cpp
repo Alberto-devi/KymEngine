@@ -1083,6 +1083,7 @@ bool PopulateProjectFromTemplate(
     nlohmann::json projJson;
     projJson["name"] = projectName;
     projJson["version"] = "0.1.0";
+    projJson["engineVersion"] = KM_ENGINE_VERSION;
     projJson["sampleRevision"] = 2;
     projJson["startScene"] = "scenes/main.kmscene";
     WriteTextFile(projectDir / "project.kmproj", projJson.dump(2) + "\n");
@@ -1319,6 +1320,7 @@ bool ProjectManager::OpenProject(const std::filesystem::path& projectFileOrDir) 
     ProjectConfig cfg;
     cfg.name = root.value("name", resolvedFile.parent_path().filename().string());
     cfg.version = root.value("version", "0.1.0");
+    cfg.engineVersion = root.value("engineVersion", cfg.version);
     cfg.startScene = root.value("startScene", "scenes/main.kmscene");
     cfg.projectDir = resolvedFile.parent_path();
 

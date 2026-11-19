@@ -9,20 +9,21 @@ APPDIR="$BUILD_DIR/KymEngine.AppDir"
 OUT_DIR="$BUILD_DIR/dist"
 APPIMAGE_FILE="$OUT_DIR/KymEngine-${VERSION}-${ARCH}.AppImage"
 
-if [[ ! -x "$BUILD_DIR/editor/KyumistEditor" || ! -x "$BUILD_DIR/runtime/KyumistRuntime" ]]; then
-  cmake -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release
+if [[ ! -x "$BUILD_DIR/hub/KymEngineHub" || ! -x "$BUILD_DIR/editor/KyumistEditor" || ! -x "$BUILD_DIR/runtime/KyumistRuntime" ]]; then
+  cmake -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DKYMENGINE_VERSION="$VERSION"
   cmake --build "$BUILD_DIR" -j
 fi
 
 rm -rf "$APPDIR"
 mkdir -p "$APPDIR/usr/bin/java" "$APPDIR/usr/lib" "$OUT_DIR"
 
+cp "$BUILD_DIR/hub/KymEngineHub" "$APPDIR/usr/bin/"
 cp "$BUILD_DIR/editor/KyumistEditor" "$APPDIR/usr/bin/"
 cp "$BUILD_DIR/runtime/KyumistRuntime" "$APPDIR/usr/bin/"
 cp "$BUILD_DIR/java/kyumist-api.jar" "$APPDIR/usr/bin/java/"
 cp -r "$ROOT_DIR/assets" "$APPDIR/usr/bin/"
 cp "$ROOT_DIR/LICENSE" "$APPDIR/usr/bin/"
-chmod 0755 "$APPDIR/usr/bin/KyumistEditor" "$APPDIR/usr/bin/KyumistRuntime"
+chmod 0755 "$APPDIR/usr/bin/KymEngineHub" "$APPDIR/usr/bin/KyumistEditor" "$APPDIR/usr/bin/KyumistRuntime"
 
 cp "$ROOT_DIR/packaging/icons/kymengine.svg" "$APPDIR/kymengine.svg"
 cp "$ROOT_DIR/packaging/icons/kymengine.svg" "$APPDIR/.DirIcon"
@@ -31,9 +32,9 @@ cat <<'EOF' > "$APPDIR/kymengine.desktop"
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=KymEngine
-Comment=Motor de juegos 3D/2D KymEngine
-Exec=KyumistEditor
+Name=KymEngine Hub
+Comment=Launcher y gestor de versiones de KymEngine
+Exec=KymEngineHub
 Icon=kymengine
 Terminal=false
 Categories=Development;IDE;Game;
@@ -51,7 +52,7 @@ if [[ -z "${JAVA_HOME:-}" ]]; then
   fi
 fi
 export LD_LIBRARY_PATH="$HERE/usr/lib:${JAVA_HOME:+$JAVA_HOME/lib/server:}${LD_LIBRARY_PATH:-}"
-exec "$HERE/usr/bin/KyumistEditor" "$@"
+exec "$HERE/usr/bin/KymEngineHub" "$@"
 EOF
 chmod 0755 "$APPDIR/AppRun"
 

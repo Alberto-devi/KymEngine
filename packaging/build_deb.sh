@@ -9,8 +9,8 @@ PKG_DIR="$BUILD_DIR/pkg_deb"
 OUT_DIR="$BUILD_DIR/dist"
 DEB_FILE="$OUT_DIR/kymengine_${VERSION}_${ARCH}.deb"
 
-if [[ ! -x "$BUILD_DIR/editor/KyumistEditor" || ! -x "$BUILD_DIR/runtime/KyumistRuntime" ]]; then
-  cmake -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release
+if [[ ! -x "$BUILD_DIR/hub/KymEngineHub" || ! -x "$BUILD_DIR/editor/KyumistEditor" || ! -x "$BUILD_DIR/runtime/KyumistRuntime" ]]; then
+  cmake -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DKYMENGINE_VERSION="$VERSION"
   cmake --build "$BUILD_DIR" -j
 fi
 
@@ -23,12 +23,13 @@ mkdir -p \
   "$PKG_DIR/usr/share/icons/hicolor/scalable/apps" \
   "$OUT_DIR"
 
+cp "$BUILD_DIR/hub/KymEngineHub" "$PKG_DIR/opt/kymengine/"
 cp "$BUILD_DIR/editor/KyumistEditor" "$PKG_DIR/opt/kymengine/"
 cp "$BUILD_DIR/runtime/KyumistRuntime" "$PKG_DIR/opt/kymengine/"
 cp "$BUILD_DIR/java/kyumist-api.jar" "$PKG_DIR/opt/kymengine/java/"
 cp -r "$ROOT_DIR/assets" "$PKG_DIR/opt/kymengine/"
 cp "$ROOT_DIR/LICENSE" "$PKG_DIR/opt/kymengine/"
-chmod 0755 "$PKG_DIR/opt/kymengine/KyumistEditor" "$PKG_DIR/opt/kymengine/KyumistRuntime"
+chmod 0755 "$PKG_DIR/opt/kymengine/KymEngineHub" "$PKG_DIR/opt/kymengine/KyumistEditor" "$PKG_DIR/opt/kymengine/KyumistRuntime"
 
 cat <<'EOF' > "$PKG_DIR/usr/bin/kymengine"
 #!/usr/bin/env bash
@@ -42,7 +43,7 @@ fi
 if [[ -n "${JAVA_HOME:-}" && -d "$JAVA_HOME/lib/server" ]]; then
   export LD_LIBRARY_PATH="$JAVA_HOME/lib/server:${LD_LIBRARY_PATH:-}"
 fi
-exec /opt/kymengine/KyumistEditor "$@"
+exec /opt/kymengine/KymEngineHub "$@"
 EOF
 chmod 0755 "$PKG_DIR/usr/bin/kymengine"
 
@@ -70,7 +71,7 @@ Section: devel
 Priority: optional
 Architecture: ${ARCH}
 Installed-Size: ${INSTALLED_SIZE_KB}
-Depends: libvulkan1, libx11-6, zlib1g, libstdc++6, openjdk-25-jdk | openjdk-21-jdk | default-jdk
+Depends: libvulkan1, libx11-6, zlib1g, libstdc++6, curl, tar, openjdk-25-jdk | openjdk-21-jdk | default-jdk
 Maintainer: Alberto-devi <6ike.450@gmail.com>
 Homepage: https://github.com/Alberto-devi/KymEngine
 Description: KymEngine 3D/2D Game Engine (C++20, Vulkan 1.3 & Java)

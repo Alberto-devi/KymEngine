@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.24)
-project(KyumistEngine VERSION 0.1.0 LANGUAGES C CXX)
+project(KyumistEngine VERSION 0.1.1 LANGUAGES C CXX)
+
+if(NOT DEFINED KYMENGINE_VERSION OR "${KYMENGINE_VERSION}" STREQUAL "")
+    set(KYMENGINE_VERSION "${PROJECT_VERSION}")
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -220,6 +224,7 @@ add_jar(kyumist_java_api
 enable_testing()
 add_subdirectory(engine)
 add_subdirectory(editor)
+add_subdirectory(hub)
 add_subdirectory(runtime)
 add_subdirectory(tests)
 

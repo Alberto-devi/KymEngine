@@ -34,7 +34,9 @@ jobs:
 
       - name: Configure & Build
         run: |
-          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          TAG_VER="${GITHUB_REF_NAME#v}"
+          if [[ -z "$TAG_VER" || "$TAG_VER" == "main" ]]; then TAG_VER="0.1.1"; fi
+          cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DKYMENGINE_VERSION="$TAG_VER"
           cmake --build build -j
 
       - name: Run unit tests
@@ -43,14 +45,15 @@ jobs:
       - name: Package Linux (.tar.gz, .deb & .AppImage)
         run: |
           TAG_VER="${GITHUB_REF_NAME#v}"
-          if [[ -z "$TAG_VER" || "$TAG_VER" == "main" ]]; then TAG_VER="0.1.0"; fi
+          if [[ -z "$TAG_VER" || "$TAG_VER" == "main" ]]; then TAG_VER="0.1.1"; fi
           mkdir -p dist/KymEngine-linux-x64/java
+          cp build/hub/KymEngineHub dist/KymEngine-linux-x64/
           cp build/editor/KyumistEditor dist/KymEngine-linux-x64/
           cp build/runtime/KyumistRuntime dist/KymEngine-linux-x64/
           cp build/java/kyumist-api.jar dist/KymEngine-linux-x64/java/
           cp -r assets examples Documentacion LICENSE dist/KymEngine-linux-x64/
-          printf '%s\n' '#!/usr/bin/env bash' 'cd "$(dirname "$0")" || exit 1' 'exec ./KyumistEditor "$@"' > dist/KymEngine-linux-x64/KymEngine.sh
-          chmod +x dist/KymEngine-linux-x64/KyumistEditor dist/KymEngine-linux-x64/KyumistRuntime dist/KymEngine-linux-x64/KymEngine.sh
+          printf '%s\n' '#!/usr/bin/env bash' 'cd "$(dirname "$0")" || exit 1' 'exec ./KymEngineHub "$@"' > dist/KymEngine-linux-x64/KymEngine.sh
+          chmod +x dist/KymEngine-linux-x64/KymEngineHub dist/KymEngine-linux-x64/KyumistEditor dist/KymEngine-linux-x64/KyumistRuntime dist/KymEngine-linux-x64/KymEngine.sh
           tar -C dist -czf KymEngine-linux-x64.tar.gz KymEngine-linux-x64
 
           chmod +x packaging/build_deb.sh packaging/build_appimage.sh
@@ -96,7 +99,8 @@ jobs:
       - name: Configure & Build
         shell: pwsh
         run: |
-          cmake -B build -A x64
+          $tagVer = if ($env:GITHUB_REF_NAME -match '^v(.+)$') { $matches[1] } else { "0.1.1" }
+          cmake -B build -A x64 "-DKYMENGINE_VERSION=$tagVer"
           cmake --build build --config Release -j
 
       - name: Run unit tests
@@ -108,8 +112,9 @@ jobs:
       - name: Package Windows (.zip & setup .exe)
         shell: pwsh
         run: |
-          $tagVer = if ($env:GITHUB_REF_NAME -match '^v(.+)$') { $matches[1] } else { "0.1.0" }
+          $tagVer = if ($env:GITHUB_REF_NAME -match '^v(.+)$') { $matches[1] } else { "0.1.1" }
           New-Item -ItemType Directory -Force -Path dist\KymEngine-windows-x64\java | Out-Null
+          Copy-Item build\hub\Release\KymEngineHub.exe dist\KymEngine-windows-x64\
           Copy-Item build\editor\Release\KyumistEditor.exe dist\KymEngine-windows-x64\
           Copy-Item build\runtime\Release\KyumistRuntime.exe dist\KymEngine-windows-x64\
           Copy-Item build\java\kyumist-api.jar dist\KymEngine-windows-x64\java\
@@ -118,7 +123,7 @@ jobs:
             '@echo off',
             'cd /d "%~dp0"',
             'if defined JAVA_HOME set "PATH=%JAVA_HOME%\bin\server;%JAVA_HOME%\bin;%PATH%"',
-            'start "" "KyumistEditor.exe" %*'
+            'start "" "KymEngineHub.exe" %*'
           ) | Set-Content -Encoding ASCII dist\KymEngine-windows-x64\KymEngine.bat
           Compress-Archive -Path dist\KymEngine-windows-x64 -DestinationPath KymEngine-windows-x64.zip
           $makensis = Get-Command makensis -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
@@ -155,5 +160,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          prerelease: ${{ contains(github.ref, '-alpha') || contains(github.ref, '-beta') || contains(github.ref, '-rc') }}
           files: |
             artifacts/*

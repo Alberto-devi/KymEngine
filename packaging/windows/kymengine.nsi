@@ -41,13 +41,14 @@ Section "KymEngine (Editor + Runtime)" SecMain
   WriteUninstaller "$INSTDIR\Uninstall.exe"
 
   CreateDirectory "$SMPROGRAMS\KymEngine"
-  CreateShortcut "$SMPROGRAMS\KymEngine\KymEngine.lnk" "$INSTDIR\KymEngine.bat" "" "$INSTDIR\KyumistEditor.exe" 0
+  CreateShortcut "$SMPROGRAMS\KymEngine\KymEngine Hub.lnk" "$INSTDIR\KymEngine.bat" "" "$INSTDIR\KymEngineHub.exe" 0
   CreateShortcut "$SMPROGRAMS\KymEngine\Desinstalar KymEngine.lnk" "$INSTDIR\Uninstall.exe"
-  CreateShortcut "$DESKTOP\KymEngine.lnk" "$INSTDIR\KymEngine.bat" "" "$INSTDIR\KyumistEditor.exe" 0
+  CreateShortcut "$DESKTOP\KymEngine Hub.lnk" "$INSTDIR\KymEngine.bat" "" "$INSTDIR\KymEngineHub.exe" 0
 SectionEnd
 
 Section "Uninstall"
   Delete "$DESKTOP\KymEngine.lnk"
+  Delete "$DESKTOP\KymEngine Hub.lnk"
   RMDir /r "$SMPROGRAMS\KymEngine"
   RMDir /r "$INSTDIR"
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\KymEngine"

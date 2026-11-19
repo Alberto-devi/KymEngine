@@ -35,6 +35,7 @@ target_compile_definitions(kyumist_engine PUBLIC
     KM_SCRIPTS_DIR="${CMAKE_SOURCE_DIR}/assets/scripts"
     KM_SCRIPTS_BUILD_DIR="${CMAKE_BINARY_DIR}/user-scripts-classes"
     KM_JAVAC_EXECUTABLE="${Java_JAVAC_EXECUTABLE}"
+    KM_ENGINE_VERSION="${KYMENGINE_VERSION}"
 )
 
 if(WIN32)

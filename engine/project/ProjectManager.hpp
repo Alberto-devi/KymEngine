@@ -4,11 +4,16 @@
 #include <string>
 #include <vector>
 
+#ifndef KM_ENGINE_VERSION
+#define KM_ENGINE_VERSION "0.1.1"
+#endif
+
 namespace Kyumist {
 
 struct ProjectConfig {
     std::string name;
     std::string version = "0.1.0";
+    std::string engineVersion = KM_ENGINE_VERSION;
     std::string startScene = "scenes/main.kmscene";
     std::filesystem::path projectDir;
 };

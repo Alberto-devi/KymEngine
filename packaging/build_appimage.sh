@@ -61,7 +61,7 @@ if [[ -z "$APPIMAGETOOL" && -x /tmp/appimagetool-x86_64.AppImage ]]; then
 fi
 
 if [[ -n "$APPIMAGETOOL" ]]; then
-  ARCH="$ARCH" "$APPIMAGETOOL" "$APPDIR" "$APPIMAGE_FILE"
+  APPIMAGE_EXTRACT_AND_RUN=1 ARCH="$ARCH" "$APPIMAGETOOL" "$APPDIR" "$APPIMAGE_FILE"
   echo "AppImage generado en: $APPIMAGE_FILE"
 else
   echo "AppDir preparado correctamente en: $APPDIR"

@@ -576,11 +576,14 @@ private:
         ImGui::InputText("Carpeta padre", m_NewProjectParent.data(), m_NewProjectParent.size());
 
         const char* templates[] = {
-            "Hibrido 3D + 2D (Aether Guardian)",
-            "Shooter 3D (Vortex Arena)",
-            "Plataformas 2D (SkyHop)"
+            "Hibrido 3D + 2D (Aether Guardian - Demo)",
+            "Shooter 3D (Vortex Arena - Demo)",
+            "Plataformas 2D (SkyHop - Demo)",
+            "En blanco 3D (Camara + Luz)",
+            "En blanco 2D (Camara Ortografica)",
+            "En blanco Mixto 3D + 2D (Camara + Luz)"
         };
-        ImGui::Combo("Plantilla", &m_NewProjectTemplateIdx, templates, 3);
+        ImGui::Combo("Plantilla", &m_NewProjectTemplateIdx, templates, 6);
 
         if (m_Installed.empty()) {
             ImGui::TextColored(ImVec4(0.95f, 0.4f, 0.4f, 1.0f), "Instala primero una version del editor en 'Instalaciones'.");

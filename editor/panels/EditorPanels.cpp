@@ -1282,10 +1282,13 @@ void EditorPanels::RenderProjectManager(Scene& scene, bool& shouldClose) {
         const char* templates[] = {
             "Hibrido 3D + 2D (Aether Guardian — Santuario HD-2D)",
             "Shooter 3D (Vortex Arena — Raycast y Drones)",
-            "Plataformas 2D (SkyHop — Fisicas Box2D y Monedas)"
+            "Plataformas 2D (SkyHop — Fisicas Box2D y Monedas)",
+            "En blanco 3D (Camara + Luz)",
+            "En blanco 2D (Camara Ortografica)",
+            "En blanco Mixto 3D + 2D (Camara + Luz)"
         };
         ImGui::SetNextItemWidth(-1.0f);
-        ImGui::Combo("##ProjTemplate", &m_NewProjectTemplate, templates, 3);
+        ImGui::Combo("##ProjTemplate", &m_NewProjectTemplate, templates, 6);
         ImGui::Spacing();
 
         ImGui::Separator();

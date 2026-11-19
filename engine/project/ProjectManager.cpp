@@ -1060,6 +1060,61 @@ void BuildPlatformer2DProjectFiles(Scene& scene, const std::filesystem::path& pr
     );
 }
 
+void BuildBlank3DProjectFiles(Scene& scene, const std::filesystem::path&) {
+    auto& reg = scene.GetRegistry();
+    scene.Clear();
+
+    entt::entity light = scene.CreateEntity("Directional Light");
+    auto& ltr = reg.get<TransformComponent>(light);
+    ltr.translation = {0.0f, 8.0f, 0.0f};
+    ltr.rotationDegrees = {-45.0f, -30.0f, 0.0f};
+    reg.emplace<DirectionalLightComponent>(light).intensity = 1.25f;
+    reg.emplace<SkyboxComponent>(light);
+
+    entt::entity cam = scene.CreateEntity("Main Camera");
+    auto& ctr = reg.get<TransformComponent>(cam);
+    ctr.translation = {0.0f, 2.5f, 6.0f};
+    ctr.rotationDegrees = {-15.0f, 0.0f, 0.0f};
+    auto& cc = reg.emplace<CameraComponent>(cam);
+    cc.primary = true;
+    cc.isOrthographic = false;
+    cc.fov = 48.0f;
+}
+
+void BuildBlank2DProjectFiles(Scene& scene, const std::filesystem::path&) {
+    auto& reg = scene.GetRegistry();
+    scene.Clear();
+
+    entt::entity cam = scene.CreateEntity("Main Camera 2D");
+    auto& ctr = reg.get<TransformComponent>(cam);
+    ctr.translation = {0.0f, 0.0f, 10.0f};
+    auto& cc = reg.emplace<CameraComponent>(cam);
+    cc.primary = true;
+    cc.isOrthographic = true;
+    cc.orthoSize = 10.0f;
+}
+
+void BuildBlankHybridProjectFiles(Scene& scene, const std::filesystem::path&) {
+    auto& reg = scene.GetRegistry();
+    scene.Clear();
+
+    entt::entity light = scene.CreateEntity("Directional Light");
+    auto& ltr = reg.get<TransformComponent>(light);
+    ltr.translation = {0.0f, 8.0f, 0.0f};
+    ltr.rotationDegrees = {-42.0f, -25.0f, 0.0f};
+    reg.emplace<DirectionalLightComponent>(light).intensity = 1.25f;
+    reg.emplace<SkyboxComponent>(light);
+
+    entt::entity cam = scene.CreateEntity("Main Camera (3D+2D)");
+    auto& ctr = reg.get<TransformComponent>(cam);
+    ctr.translation = {0.0f, 3.0f, 8.5f};
+    ctr.rotationDegrees = {-18.0f, 0.0f, 0.0f};
+    auto& cc = reg.emplace<CameraComponent>(cam);
+    cc.primary = true;
+    cc.isOrthographic = false;
+    cc.fov = 46.0f;
+}
+
 bool PopulateProjectFromTemplate(
     const std::filesystem::path& projectDir,
     const std::string& projectName,
@@ -1120,6 +1175,12 @@ bool PopulateProjectFromTemplate(
         BuildShooter3DProjectFiles(scene, projectDir);
     } else if (templateIndex == 2) {
         BuildPlatformer2DProjectFiles(scene, projectDir);
+    } else if (templateIndex == 3) {
+        BuildBlank3DProjectFiles(scene, projectDir);
+    } else if (templateIndex == 4) {
+        BuildBlank2DProjectFiles(scene, projectDir);
+    } else if (templateIndex == 5) {
+        BuildBlankHybridProjectFiles(scene, projectDir);
     } else {
         BuildHybridSanctuaryProjectFiles(scene, projectDir);
     }

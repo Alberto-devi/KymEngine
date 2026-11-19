@@ -85,10 +85,9 @@ jobs:
       - name: Setup Vulkan SDK
         shell: pwsh
         run: |
-          $sdkVer = "1.3.280.0"
-          $sdkDir = "C:\VulkanSDK\$sdkVer"
-          $installer = "$env:TEMP\VulkanSDK.exe"
-          Invoke-WebRequest -Uri "https://sdk.lunarg.com/sdk/download/$sdkVer/windows/VulkanSDK-$sdkVer-Installer.exe" -OutFile $installer
+          $sdkDir = "C:\VulkanSDK"
+          $installer = "$env:TEMP\vulkan-sdk.exe"
+          Invoke-WebRequest -Uri "https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-sdk.exe" -OutFile $installer
           Start-Process -FilePath $installer -ArgumentList "--root", $sdkDir, "--accept-licenses", "--default-answer", "--confirm-command", "install" -Wait
           Remove-Item $installer -Force
           "VULKAN_SDK=$sdkDir" | Out-File -FilePath $env:GITHUB_ENV -Append

@@ -1,6 +1,7 @@
 #include "audio/AudioEngine.hpp"
 #include "core/Application.hpp"
 #include "core/Log.hpp"
+#include "core/PlatformPaths.hpp"
 #include "physics/PhysicsSystem.hpp"
 #include "project/ProjectManager.hpp"
 #include "scene/Components.hpp"
@@ -204,6 +205,19 @@ int main(int argc, char** argv) {
             }
         } else if (arg == "--title" && i + 1 < argc) {
             spec.name = argv[++i];
+        }
+    }
+
+    if (projectPath.empty() && !explicitScene) {
+        std::error_code ec;
+        const std::filesystem::path exeProj = Kyumist::PlatformPaths::GetExecutableDir() / "project.kmproj";
+        const std::filesystem::path cwdProj = std::filesystem::current_path(ec) / "project.kmproj";
+        if (std::filesystem::exists(exeProj, ec)) {
+            projectPath = exeProj;
+            scenePath.clear();
+        } else if (std::filesystem::exists(cwdProj, ec)) {
+            projectPath = cwdProj;
+            scenePath.clear();
         }
     }
 

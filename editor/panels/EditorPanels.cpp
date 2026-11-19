@@ -2,6 +2,7 @@
 
 #include "audio/AudioEngine.hpp"
 #include "core/Log.hpp"
+#include "core/PlatformPaths.hpp"
 #include "physics/PhysicsSystem.hpp"
 #include "project/ProjectManager.hpp"
 #include "renderer/ModelLoader.hpp"
@@ -1020,6 +1021,7 @@ void EditorPanels::Render(
     }
 
     RenderAssetImportModal(renderer, scene);
+    RenderExportProjectModal();
 
     const ImGuiIO& io = ImGui::GetIO();
     if (!m_IsPlaying &&
@@ -1673,24 +1675,26 @@ void EditorPanels::RenderMenuBar(Scene& scene, bool& shouldClose) {
             m_OpenAssetImportPopup = true;
         }
         if (ImGui::MenuItem("Exportar Juego (Standalone)...")) {
-            std::string projFolder = "KyumistGame";
+            std::string projFolder = "KymEngineGame";
             if (ProjectManager::HasActiveProject()) {
                 projFolder = ProjectManager::GetActiveProject().name;
                 for (char& ch : projFolder) {
-                    if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '_') {
+                    if (!std::isalnum(static_cast<unsigned char>(ch)) && ch != '_' && ch != '-') {
                         ch = '_';
                     }
                 }
             }
-            const std::filesystem::path exportOut = m_AssetsRoot.parent_path() / "build" / "export" / projFolder;
-            const std::filesystem::path fallbackOut = std::filesystem::current_path() / "build" / "export" / projFolder;
-            const std::filesystem::path targetOut = std::filesystem::exists(m_AssetsRoot.parent_path() / "build")
-                ? exportOut
-                : fallbackOut;
-            std::string err;
-            if (!ProjectManager::ExportProjectBuild(targetOut, &err)) {
-                KM_ERROR("Error al exportar juego: {}", err);
-            }
+            std::strncpy(m_ExportExeName, projFolder.c_str(), sizeof(m_ExportExeName) - 1);
+            m_ExportExeName[sizeof(m_ExportExeName) - 1] = '\0';
+
+            const char* platDir = (m_ExportPlatformIdx == 0) ? "windows-x64" : "linux-x64";
+            const std::filesystem::path defaultOut = ProjectManager::GetActiveProjectDir() / "exports" / platDir;
+            const std::string outUtf8 = PlatformPaths::PathToUtf8(defaultOut);
+            std::strncpy(m_ExportOutputDir, outUtf8.c_str(), sizeof(m_ExportOutputDir) - 1);
+            m_ExportOutputDir[sizeof(m_ExportOutputDir) - 1] = '\0';
+            m_ExportStatus.clear();
+            m_ExportError.clear();
+            m_OpenExportModal = true;
         }
         ImGui::Separator();
         if (ImGui::MenuItem("Cerrar Proyecto (Project Manager)")) {
@@ -3474,6 +3478,93 @@ void EditorPanels::RenderContentBrowser(Scene& scene) {
     ImGui::EndChild();
 
     ImGui::End();
+}
+
+void EditorPanels::RenderExportProjectModal() {
+    if (m_IsExporting && m_ExportFuture.valid() &&
+        m_ExportFuture.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+        const bool ok = m_ExportFuture.get();
+        m_IsExporting = false;
+        if (ok) {
+            m_ExportStatus = std::string("Exportado correctamente en: ") + m_ExportOutputDir;
+            m_ExportError.clear();
+        } else if (m_ExportError.empty()) {
+            m_ExportError = "No se pudo completar la exportacion.";
+        }
+    }
+
+    if (m_OpenExportModal) {
+        ImGui::OpenPopup("Exportar Juego");
+        m_OpenExportModal = false;
+    }
+    if (!ImGui::BeginPopupModal("Exportar Juego", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        return;
+    }
+
+    const char* platforms[] = {"Windows (x64)", "Linux (x64)"};
+    if (ImGui::Combo("Plataforma destino", &m_ExportPlatformIdx, platforms, 2)) {
+        const char* platDir = (m_ExportPlatformIdx == 0) ? "windows-x64" : "linux-x64";
+        const std::filesystem::path defaultOut = ProjectManager::GetActiveProjectDir() / "exports" / platDir;
+        const std::string outUtf8 = PlatformPaths::PathToUtf8(defaultOut);
+        std::strncpy(m_ExportOutputDir, outUtf8.c_str(), sizeof(m_ExportOutputDir) - 1);
+        m_ExportOutputDir[sizeof(m_ExportOutputDir) - 1] = '\0';
+    }
+
+    const ExportPlatform targetPlat = (m_ExportPlatformIdx == 0)
+        ? ExportPlatform::WindowsX64
+        : ExportPlatform::LinuxX64;
+    if (ProjectManager::HasExportTemplate(targetPlat)) {
+        ImGui::TextColored(ImVec4(0.35f, 0.88f, 0.45f, 1.0f), "Plantilla de exportacion lista localmente.");
+    } else {
+        ImGui::TextColored(ImVec4(0.95f, 0.72f, 0.25f, 1.0f),
+                           "Se descargara automaticamente la plantilla desde GitHub Releases al exportar.");
+    }
+
+    ImGui::InputText("Nombre del ejecutable", m_ExportExeName, sizeof(m_ExportExeName));
+    ImGui::SetNextItemWidth(460.0f);
+    ImGui::InputText("Carpeta de salida", m_ExportOutputDir, sizeof(m_ExportOutputDir));
+    ImGui::Checkbox("Comprimir paquete (.zip / .tar.gz) listo para compartir", &m_ExportCreateArchive);
+
+    if (!m_ExportStatus.empty()) {
+        ImGui::Spacing();
+        ImGui::TextColored(ImVec4(0.35f, 0.88f, 0.45f, 1.0f), "%s", m_ExportStatus.c_str());
+    }
+    if (!m_ExportError.empty()) {
+        ImGui::Spacing();
+        ImGui::TextColored(ImVec4(0.95f, 0.38f, 0.38f, 1.0f), "%s", m_ExportError.c_str());
+    }
+
+    ImGui::Spacing();
+    ImGui::BeginDisabled(m_IsExporting);
+    if (ImGui::Button(m_IsExporting ? "Exportando..." : "Exportar", ImVec2(140.0f, 0.0f))) {
+        m_ExportStatus.clear();
+        m_ExportError.clear();
+        ExportOptions opts;
+        opts.platform = targetPlat;
+        opts.outputDir = PlatformPaths::Utf8ToPath(m_ExportOutputDir);
+        opts.executableName = m_ExportExeName;
+        opts.downloadTemplateIfMissing = true;
+        opts.createArchive = m_ExportCreateArchive;
+        m_IsExporting = true;
+        m_ExportStatus = "Preparando plantilla y exportando proyecto...";
+        m_ExportFuture = std::async(std::launch::async, [this, opts]() {
+            std::string err;
+            const bool ok = ProjectManager::ExportProjectForPlatform(opts, &err);
+            if (!ok) {
+                m_ExportError = err;
+            }
+            return ok;
+        });
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(m_IsExporting);
+    if (ImGui::Button("Cerrar", ImVec2(100.0f, 0.0f))) {
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndDisabled();
+
+    ImGui::EndPopup();
 }
 
 } // namespace Kyumist

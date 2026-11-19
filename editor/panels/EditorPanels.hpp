@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <future>
 #include <string>
 #include <vector>
 
@@ -98,6 +99,7 @@ private:
     ) const;
 
     entt::entity DuplicateEntity(Scene& scene, entt::entity src);
+    void RenderExportProjectModal();
 
     ScriptEditorPanel m_ScriptEditor;
 
@@ -158,6 +160,21 @@ private:
     std::vector<SceneHistoryEntry> m_SceneRedoStack;
     std::string m_LastCommittedSceneState;
     std::string m_LastCommittedSelectedTag;
+
+    bool m_OpenExportModal = false;
+    int m_ExportPlatformIdx =
+#ifdef _WIN32
+        0;
+#else
+        1;
+#endif
+    char m_ExportExeName[128] = "KymEngineGame";
+    char m_ExportOutputDir[512]{};
+    bool m_ExportCreateArchive = true;
+    bool m_IsExporting = false;
+    std::future<bool> m_ExportFuture;
+    std::string m_ExportStatus;
+    std::string m_ExportError;
 };
 
 } // namespace Kyumist

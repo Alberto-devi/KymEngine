@@ -1551,40 +1551,449 @@ bool ProjectManager::ExportProjectBuild(const std::filesystem::path& outputDir, 
         ? "scenes/main.kmscene"
         : s_Proj.activeConfig.startScene;
 
-    const std::filesystem::path launcherPath = outputDir / "run_game.sh";
-    WriteTextFile(
-        launcherPath,
-        "#!/usr/bin/env bash\n"
-        "cd \"$(dirname \"$0\")\"\n"
-        "if [ -x ./KyumistRuntime ]; then\n"
-        "  ./KyumistRuntime --scene \"" + startScene + "\" \"$@\"\n"
-        "else\n"
-        "  echo 'KyumistRuntime executable not found in export bundle.'\n"
-        "  exit 1\n"
-        "fi\n"
+    ExportOptions opts;
+    opts.outputDir = outputDir;
+    opts.downloadTemplateIfMissing = false;
+    if (!ExportProjectForPlatform(opts, outError)) {
+        return false;
+    }
+
+    const std::filesystem::path runSh = outputDir / "run_game.sh";
+    if (!std::filesystem::exists(runSh, ec)) {
+        WriteTextFile(
+            runSh,
+            "#!/usr/bin/env bash\n"
+            "cd \"$(dirname \"$0\")\"\n"
+            "exec ./" + (s_Proj.activeConfig.name.empty() ? std::string("KymEngineGame") : s_Proj.activeConfig.name) +
+                " --scene \"" + startScene + "\" \"$@\"\n"
+        );
+        std::filesystem::permissions(
+            runSh,
+            std::filesystem::perms::owner_exec | std::filesystem::perms::group_exec | std::filesystem::perms::others_exec,
+            std::filesystem::perm_options::add,
+            ec
+        );
+    }
+    const std::filesystem::path runBat = outputDir / "run_game.bat";
+    if (!std::filesystem::exists(runBat, ec)) {
+        WriteTextFile(
+            runBat,
+            "@echo off\r\n"
+            "cd /d \"%~dp0\"\r\n"
+            "\"" + (s_Proj.activeConfig.name.empty() ? std::string("KymEngineGame") : s_Proj.activeConfig.name) +
+                ".exe\" --scene \"" + startScene + "\" %*\r\n"
+        );
+    }
+    return true;
+}
+
+namespace {
+
+const char* PlatformSubdir(ExportPlatform platform) {
+    return platform == ExportPlatform::WindowsX64 ? "windows-x64" : "linux-x64";
+}
+
+const char* RuntimeFileName(ExportPlatform platform) {
+    return platform == ExportPlatform::WindowsX64 ? "KyumistRuntime.exe" : "KyumistRuntime";
+}
+
+std::filesystem::path FindRuntimeInDir(const std::filesystem::path& dir, ExportPlatform platform) {
+    std::error_code ec;
+    if (dir.empty() || !std::filesystem::exists(dir, ec)) {
+        return {};
+    }
+    const std::string exeName = RuntimeFileName(platform);
+    const std::filesystem::path direct = dir / exeName;
+    if (std::filesystem::exists(direct, ec) && std::filesystem::is_regular_file(direct, ec)) {
+        return dir;
+    }
+    for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+        if (!entry.is_directory(ec)) {
+            continue;
+        }
+        const std::filesystem::path nested = entry.path() / exeName;
+        if (std::filesystem::exists(nested, ec) && std::filesystem::is_regular_file(nested, ec)) {
+            return entry.path();
+        }
+    }
+    return {};
+}
+
+std::filesystem::path ResolveExportTemplateDir(ExportPlatform platform) {
+    std::error_code ec;
+#ifdef _WIN32
+    const bool isHostPlatform = (platform == ExportPlatform::WindowsX64);
+#else
+    const bool isHostPlatform = (platform == ExportPlatform::LinuxX64);
+#endif
+
+    if (isHostPlatform) {
+        const std::filesystem::path exeDir = PlatformPaths::GetExecutableDir();
+        if (!FindRuntimeInDir(exeDir, platform).empty()) {
+            return exeDir;
+        }
+#ifdef KM_JAVA_API_JAR
+        const std::filesystem::path buildDir = std::filesystem::path(KM_JAVA_API_JAR).parent_path().parent_path();
+#else
+        const std::filesystem::path buildDir("build");
+#endif
+        const std::filesystem::path buildCandidates[] = {
+            buildDir / "runtime" / "Release",
+            buildDir / "runtime" / "Debug",
+            buildDir / "runtime"
+        };
+        for (const auto& c : buildCandidates) {
+            if (!FindRuntimeInDir(c, platform).empty()) {
+                return c;
+            }
+        }
+    }
+
+    const std::filesystem::path tplRoot = PlatformPaths::GetUserDataDir() / "templates";
+    const std::filesystem::path versioned = tplRoot / KM_ENGINE_VERSION / PlatformSubdir(platform);
+    if (const std::filesystem::path found = FindRuntimeInDir(versioned, platform); !found.empty()) {
+        return found;
+    }
+    const std::filesystem::path latest = tplRoot / "latest" / PlatformSubdir(platform);
+    if (const std::filesystem::path found = FindRuntimeInDir(latest, platform); !found.empty()) {
+        return found;
+    }
+    return {};
+}
+
+std::string QuoteShellArg(const std::string& arg) {
+    std::string out = "\"";
+    for (char c : arg) {
+        if (c == '"') {
+            out += "\\\"";
+        } else {
+            out += c;
+        }
+    }
+    out += '"';
+    return out;
+}
+
+int RunQuietCommand(const std::string& cmd) {
+#ifdef _WIN32
+    STARTUPINFOA si{};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi{};
+    std::string mutableCmd = cmd;
+    if (!::CreateProcessA(nullptr, mutableCmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+        return -1;
+    }
+    ::WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD exitCode = 1;
+    ::GetExitCodeProcess(pi.hProcess, &exitCode);
+    ::CloseHandle(pi.hProcess);
+    ::CloseHandle(pi.hThread);
+    return static_cast<int>(exitCode);
+#else
+    return std::system(cmd.c_str());
+#endif
+}
+
+std::string SanitizeExecutableName(std::string name) {
+    std::string out;
+    for (char c : name) {
+        if (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-') {
+            out += c;
+        } else if (c == ' ') {
+            out += '_';
+        }
+    }
+    if (out.empty()) {
+        out = "KymEngineGame";
+    }
+    return out;
+}
+
+} // namespace
+
+bool ProjectManager::HasExportTemplate(ExportPlatform platform) {
+    return !ResolveExportTemplateDir(platform).empty();
+}
+
+bool ProjectManager::DownloadExportTemplate(ExportPlatform platform, std::string* outError) {
+    std::error_code ec;
+    const std::string assetName = (platform == ExportPlatform::WindowsX64)
+        ? "KymEngine-windows-x64.zip"
+        : "KymEngine-linux-x64.tar.gz";
+
+    const std::filesystem::path targetRoot =
+        PlatformPaths::GetUserDataDir() / "templates" / KM_ENGINE_VERSION / PlatformSubdir(platform);
+    const std::filesystem::path dlDir = PlatformPaths::GetUserDataDir() / "templates" / ".downloads";
+    std::filesystem::create_directories(dlDir, ec);
+    const std::filesystem::path archivePath = dlDir / assetName;
+
+    const std::string urls[] = {
+        "https://github.com/Alberto-devi/KymEngine/releases/download/v" + std::string(KM_ENGINE_VERSION) + "/" + assetName,
+        "https://github.com/Alberto-devi/KymEngine/releases/latest/download/" + assetName
+    };
+
+    bool downloaded = false;
+    for (const auto& url : urls) {
+        const std::string cmd =
+            "curl -fL --retry 2 --connect-timeout 15 -H \"User-Agent: KymEngine\" -o " +
+            QuoteShellArg(PlatformPaths::PathToUtf8(archivePath)) + " " + QuoteShellArg(url);
+        if (RunQuietCommand(cmd) == 0 && std::filesystem::exists(archivePath, ec)) {
+            downloaded = true;
+            break;
+        }
+        std::filesystem::remove(archivePath, ec);
+    }
+
+    if (!downloaded) {
+        if (outError) {
+            *outError = "No se pudo descargar la plantilla " + assetName + " desde GitHub Releases.";
+        }
+        return false;
+    }
+
+    std::filesystem::remove_all(targetRoot, ec);
+    std::filesystem::create_directories(targetRoot, ec);
+
+    const std::string extractFlag = (platform == ExportPlatform::WindowsX64) ? "-xf" : "-xzf";
+    const std::string extractCmd =
+        "tar " + extractFlag + " " + QuoteShellArg(PlatformPaths::PathToUtf8(archivePath)) +
+        " -C " + QuoteShellArg(PlatformPaths::PathToUtf8(targetRoot));
+    const int exRc = RunQuietCommand(extractCmd);
+    std::filesystem::remove(archivePath, ec);
+
+    if (exRc != 0 || FindRuntimeInDir(targetRoot, platform).empty()) {
+        std::filesystem::remove_all(targetRoot, ec);
+        if (outError) {
+            *outError = "Error al extraer la plantilla " + assetName + ".";
+        }
+        return false;
+    }
+    return true;
+}
+
+bool ProjectManager::ExportProjectForPlatform(const ExportOptions& options, std::string* outError) {
+    auto setErr = [&](const std::string& msg) {
+        if (outError) {
+            *outError = msg;
+        }
+        KM_CORE_ERROR("Project export failed: {}", msg);
+        return false;
+    };
+
+    if (!HasActiveProject()) {
+        return setErr("No hay ningun proyecto activo para exportar.");
+    }
+    if (options.outputDir.empty()) {
+        return setErr("Ruta de exportacion invalida.");
+    }
+
+    std::filesystem::path templateDir = ResolveExportTemplateDir(options.platform);
+    if (templateDir.empty() && options.downloadTemplateIfMissing) {
+        std::string dlErr;
+        if (!DownloadExportTemplate(options.platform, &dlErr)) {
+            return setErr(dlErr);
+        }
+        templateDir = ResolveExportTemplateDir(options.platform);
+    }
+    if (templateDir.empty()) {
+        return setErr("No se encontro la plantilla de exportacion para esa plataforma.");
+    }
+
+    std::error_code ec;
+    std::filesystem::create_directories(options.outputDir, ec);
+    if (ec) {
+        return setErr("No se pudo crear el directorio de salida: " + ec.message());
+    }
+
+    const std::filesystem::path projDir = GetActiveProjectDir();
+    const std::vector<std::string> foldersToCopy = {
+        "scenes", "scripts", "models", "materials", "textures", "audio", "prefabs"
+    };
+    for (const auto& folder : foldersToCopy) {
+        const std::filesystem::path src = projDir / folder;
+        const std::filesystem::path dst = options.outputDir / folder;
+        if (std::filesystem::exists(src, ec) && std::filesystem::is_directory(src, ec)) {
+            std::filesystem::create_directories(dst, ec);
+            std::filesystem::copy(
+                src,
+                dst,
+                std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing,
+                ec
+            );
+        }
+    }
+
+    const std::filesystem::path srcProjFile = projDir / "project.kmproj";
+    if (std::filesystem::exists(srcProjFile, ec)) {
+        std::filesystem::copy_file(
+            srcProjFile,
+            options.outputDir / "project.kmproj",
+            std::filesystem::copy_options::overwrite_existing,
+            ec
+        );
+    }
+
+    const std::string baseName = SanitizeExecutableName(
+        options.executableName.empty() ? s_Proj.activeConfig.name : options.executableName
     );
-    std::filesystem::permissions(
-        launcherPath,
-        std::filesystem::perms::owner_exec | std::filesystem::perms::group_exec | std::filesystem::perms::others_exec,
-        std::filesystem::perm_options::add,
+    const std::string runtimeSrcName = RuntimeFileName(options.platform);
+    const std::filesystem::path runtimeSrc = templateDir / runtimeSrcName;
+    const std::string outExeName = (options.platform == ExportPlatform::WindowsX64)
+        ? (baseName + ".exe")
+        : baseName;
+    const std::filesystem::path runtimeDst = options.outputDir / outExeName;
+
+    std::filesystem::copy_file(
+        runtimeSrc,
+        runtimeDst,
+        std::filesystem::copy_options::overwrite_existing,
         ec
     );
+    if (ec) {
+        return setErr("No se pudo copiar el ejecutable Runtime: " + ec.message());
+    }
 
-    const std::filesystem::path winLauncherPath = outputDir / "run_game.bat";
-    WriteTextFile(
-        winLauncherPath,
-        "@echo off\r\n"
-        "cd /d \"%~dp0\"\r\n"
-        "if defined JAVA_HOME set \"PATH=%JAVA_HOME%\\bin\\server;%JAVA_HOME%\\bin;%PATH%\"\r\n"
-        "if exist \"KyumistRuntime.exe\" (\r\n"
-        "  \"KyumistRuntime.exe\" --scene \"" + startScene + "\" %*\r\n"
-        ") else (\r\n"
-        "  echo KyumistRuntime.exe not found in export bundle.\r\n"
-        "  exit /b 1\r\n"
-        ")\r\n"
-    );
+    if (options.platform == ExportPlatform::LinuxX64) {
+        std::filesystem::permissions(
+            runtimeDst,
+            std::filesystem::perms::owner_exec | std::filesystem::perms::group_exec | std::filesystem::perms::others_exec,
+            std::filesystem::perm_options::add,
+            ec
+        );
+    }
 
-    KM_INFO("Proyecto '{}' exportado a '{}'.", s_Proj.activeConfig.name, outputDir.string());
+    // Copy kyumist-api.jar
+    const std::filesystem::path jarCandidates[] = {
+        templateDir / "java" / "kyumist-api.jar",
+        PlatformPaths::ResolveJavaApiJar()
+    };
+    for (const auto& jarSrc : jarCandidates) {
+        if (std::filesystem::exists(jarSrc, ec)) {
+            std::filesystem::create_directories(options.outputDir / "java", ec);
+            std::filesystem::copy_file(
+                jarSrc,
+                options.outputDir / "java" / "kyumist-api.jar",
+                std::filesystem::copy_options::overwrite_existing,
+                ec
+            );
+            break;
+        }
+    }
+
+    // Copy compiled SPIR-V shaders
+    const std::filesystem::path shaderCandidates[] = {
+        templateDir / "assets" / "shaders",
+        templateDir / "shaders",
+        PlatformPaths::ResolveShadersDir()
+    };
+    for (const auto& shadersSrc : shaderCandidates) {
+        if (std::filesystem::exists(shadersSrc, ec) && std::filesystem::is_directory(shadersSrc, ec)) {
+            std::filesystem::create_directories(options.outputDir / "shaders", ec);
+            for (const auto& entry : std::filesystem::directory_iterator(shadersSrc, ec)) {
+                if (entry.is_regular_file() && entry.path().extension() == ".spv") {
+                    std::filesystem::copy_file(
+                        entry.path(),
+                        options.outputDir / "shaders" / entry.path().filename(),
+                        std::filesystem::copy_options::overwrite_existing,
+                        ec
+                    );
+                }
+            }
+            break;
+        }
+    }
+
+    // Copy Windows JRE if exporting for Windows so jvm.dll + javac.exe are bundled
+    if (options.platform == ExportPlatform::WindowsX64) {
+        const std::filesystem::path jreCandidates[] = {
+            templateDir / "jre",
+            PlatformPaths::GetExecutableDir() / "jre"
+        };
+        for (const auto& jreSrc : jreCandidates) {
+            if (std::filesystem::exists(jreSrc / "bin" / "server" / "jvm.dll", ec)) {
+                std::filesystem::copy(
+                    jreSrc,
+                    options.outputDir / "jre",
+                    std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing,
+                    ec
+                );
+                break;
+            }
+        }
+    }
+
+    const std::string startScene = s_Proj.activeConfig.startScene.empty()
+        ? "scenes/main.kmscene"
+        : s_Proj.activeConfig.startScene;
+
+    if (options.platform == ExportPlatform::LinuxX64) {
+        const std::filesystem::path launcherPath = options.outputDir / (baseName + ".sh");
+        WriteTextFile(
+            launcherPath,
+            "#!/usr/bin/env bash\n"
+            "HERE=\"$(cd \"$(dirname \"$0\")\" && pwd)\"\n"
+            "cd \"$HERE\" || exit 1\n"
+            "if [[ -z \"${JAVA_HOME:-}\" ]]; then\n"
+            "  JAVAC_BIN=\"$(command -v javac || true)\"\n"
+            "  if [[ -n \"$JAVAC_BIN\" ]]; then\n"
+            "    JAVA_HOME=\"$(dirname \"$(dirname \"$(readlink -f \"$JAVAC_BIN\")\")\")\"\n"
+            "    export JAVA_HOME\n"
+            "  fi\n"
+            "fi\n"
+            "if [[ -n \"${JAVA_HOME:-}\" && -d \"$JAVA_HOME/lib/server\" ]]; then\n"
+            "  export LD_LIBRARY_PATH=\"$JAVA_HOME/lib/server:${LD_LIBRARY_PATH:-}\"\n"
+            "fi\n"
+            "exec \"./" + outExeName + "\" --project \"$HERE/project.kmproj\" --title \"" + s_Proj.activeConfig.name + "\" \"$@\"\n"
+        );
+        std::filesystem::permissions(
+            launcherPath,
+            std::filesystem::perms::owner_exec | std::filesystem::perms::group_exec | std::filesystem::perms::others_exec,
+            std::filesystem::perm_options::add,
+            ec
+        );
+    } else {
+        const std::filesystem::path winLauncherPath = options.outputDir / (baseName + ".bat");
+        WriteTextFile(
+            winLauncherPath,
+            "@echo off\r\n"
+            "cd /d \"%~dp0\"\r\n"
+            "if exist \"%~dp0jre\\bin\\server\\jvm.dll\" (\r\n"
+            "  set \"JAVA_HOME=%~dp0jre\"\r\n"
+            "  set \"PATH=%~dp0jre\\bin\\server;%~dp0jre\\bin;%PATH%\"\r\n"
+            ") else if defined JAVA_HOME (\r\n"
+            "  set \"PATH=%JAVA_HOME%\\bin\\server;%JAVA_HOME%\\bin;%PATH%\"\r\n"
+            ")\r\n"
+            "start \"\" \"" + outExeName + "\" --project \"%~dp0project.kmproj\" --title \"" + s_Proj.activeConfig.name + "\" %*\r\n"
+        );
+    }
+
+    if (options.createArchive) {
+        const std::filesystem::path parentDir = options.outputDir.parent_path();
+        const std::string folderName = options.outputDir.filename().string();
+        if (options.platform == ExportPlatform::LinuxX64) {
+            const std::filesystem::path tarOut = parentDir / (folderName + ".tar.gz");
+            const std::string tarCmd =
+                "tar -C " + QuoteShellArg(PlatformPaths::PathToUtf8(parentDir)) +
+                " -czf " + QuoteShellArg(PlatformPaths::PathToUtf8(tarOut)) + " " + QuoteShellArg(folderName);
+            (void)RunQuietCommand(tarCmd);
+        } else {
+            const std::filesystem::path zipOut = parentDir / (folderName + ".zip");
+#ifdef _WIN32
+            const std::string zipCmd =
+                "tar -C " + QuoteShellArg(PlatformPaths::PathToUtf8(parentDir)) +
+                " -a -cf " + QuoteShellArg(PlatformPaths::PathToUtf8(zipOut)) + " " + QuoteShellArg(folderName);
+            (void)RunQuietCommand(zipCmd);
+#else
+            const std::string zipCmd =
+                "cd " + QuoteShellArg(PlatformPaths::PathToUtf8(parentDir)) +
+                " && zip -qr " + QuoteShellArg(PlatformPaths::PathToUtf8(zipOut)) + " " + QuoteShellArg(folderName);
+            (void)RunQuietCommand(zipCmd);
+#endif
+        }
+    }
+
+    KM_INFO("Proyecto '{}' exportado ({}) a '{}'.",
+            s_Proj.activeConfig.name, PlatformSubdir(options.platform), PlatformPaths::PathToUtf8(options.outputDir));
     return true;
 }
 

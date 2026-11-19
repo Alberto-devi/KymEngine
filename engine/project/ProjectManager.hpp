@@ -32,6 +32,23 @@ struct SampleProjectEntry {
     int templateIndex = 0;
 };
 
+enum class ExportPlatform {
+    WindowsX64 = 0,
+    LinuxX64 = 1
+};
+
+struct ExportOptions {
+#ifdef _WIN32
+    ExportPlatform platform = ExportPlatform::WindowsX64;
+#else
+    ExportPlatform platform = ExportPlatform::LinuxX64;
+#endif
+    std::filesystem::path outputDir;
+    std::string executableName;
+    bool downloadTemplateIfMissing = true;
+    bool createArchive = false;
+};
+
 class ProjectManager {
 public:
     static void EnsureDefaultSampleProject();
@@ -59,6 +76,16 @@ public:
 
     static bool ExportProjectBuild(
         const std::filesystem::path& outputDir,
+        std::string* outError = nullptr
+    );
+
+    static bool HasExportTemplate(ExportPlatform platform);
+    static bool DownloadExportTemplate(
+        ExportPlatform platform,
+        std::string* outError = nullptr
+    );
+    static bool ExportProjectForPlatform(
+        const ExportOptions& options,
         std::string* outError = nullptr
     );
 };

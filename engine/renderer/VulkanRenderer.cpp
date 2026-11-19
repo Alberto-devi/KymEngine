@@ -2,6 +2,7 @@
 #include "renderer/VulkanRenderer.hpp"
 
 #include "core/Log.hpp"
+#include "core/PlatformPaths.hpp"
 #include "core/Window.hpp"
 #include "project/ProjectManager.hpp"
 #include "renderer/ModelLoader.hpp"
@@ -57,12 +58,10 @@ void CheckVkResult(VkResult result, const char* context) {
 }
 
 std::filesystem::path ResolveShaderPath(const std::string& filename) {
-#ifdef KM_SHADER_DIR
-    std::filesystem::path configured = std::filesystem::path(KM_SHADER_DIR) / filename;
+    std::filesystem::path configured = PlatformPaths::ResolveShadersDir() / filename;
     if (std::filesystem::exists(configured)) {
         return configured;
     }
-#endif
     std::filesystem::path fallback = std::filesystem::path("assets/shaders") / filename;
     if (std::filesystem::exists(fallback)) {
         return fallback;
@@ -99,12 +98,10 @@ VkShaderModule CreateShaderModule(VkDevice device, const std::vector<uint32_t>& 
 }
 
 std::filesystem::path ResolveAssetFile(const std::string& relativePath) {
-#ifdef KM_ASSETS_DIR
-    std::filesystem::path configured = std::filesystem::path(KM_ASSETS_DIR) / relativePath;
+    std::filesystem::path configured = PlatformPaths::ResolveAssetsDir() / relativePath;
     if (std::filesystem::exists(configured)) {
         return configured;
     }
-#endif
     std::filesystem::path fallback = std::filesystem::path("assets") / relativePath;
     if (std::filesystem::exists(fallback)) {
         return fallback;
@@ -1059,12 +1056,10 @@ const VulkanRenderer::GpuMesh* VulkanRenderer::GetOrLoadObjMesh(const std::strin
         }
     }
     if (!std::filesystem::exists(resolved)) {
-#ifdef KM_ASSETS_DIR
-        std::filesystem::path inAssets = std::filesystem::path(KM_ASSETS_DIR) / path;
+        std::filesystem::path inAssets = PlatformPaths::ResolveAssetsDir() / path;
         if (std::filesystem::exists(inAssets)) {
             resolved = inAssets;
         }
-#endif
     }
 
     LoadedModelData loaded;
@@ -1282,12 +1277,10 @@ VkDescriptorSet VulkanRenderer::GetOrLoadTextureDescriptor(const std::string& te
         }
     }
     if (!std::filesystem::exists(resolved)) {
-#ifdef KM_ASSETS_DIR
-        std::filesystem::path inAssets = std::filesystem::path(KM_ASSETS_DIR) / texturePath;
+        std::filesystem::path inAssets = PlatformPaths::ResolveAssetsDir() / texturePath;
         if (std::filesystem::exists(inAssets)) {
             resolved = inAssets;
         }
-#endif
     }
 
     ImageData img;

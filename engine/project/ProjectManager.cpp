@@ -2,6 +2,7 @@
 
 #include "audio/AudioEngine.hpp"
 #include "core/Log.hpp"
+#include "core/PlatformPaths.hpp"
 #include "renderer/ModelLoader.hpp"
 #include "scene/Components.hpp"
 #include "scene/Scene.hpp"
@@ -27,13 +28,7 @@ struct ProjectManagerState {
 ProjectManagerState s_Proj;
 
 std::filesystem::path ResolveDefaultAssetsDir() {
-#ifdef KM_ASSETS_DIR
-    std::filesystem::path configured(KM_ASSETS_DIR);
-    if (std::filesystem::exists(configured)) {
-        return configured;
-    }
-#endif
-    return std::filesystem::path("assets");
+    return PlatformPaths::ResolveAssetsDir();
 }
 
 std::filesystem::path ResolveExamplesDir() {
@@ -42,9 +37,12 @@ std::filesystem::path ResolveExamplesDir() {
     const std::filesystem::path absAssets = std::filesystem::weakly_canonical(assetsDir, ec);
     const std::filesystem::path baseAssets = ec ? assetsDir : absAssets;
     if (baseAssets.has_parent_path()) {
-        return baseAssets.parent_path() / "examples";
+        const std::filesystem::path parent = baseAssets.parent_path();
+        if (PlatformPaths::IsDirectoryWritable(parent)) {
+            return parent / "examples";
+        }
     }
-    return std::filesystem::path("examples");
+    return PlatformPaths::GetUserDataDir() / "examples";
 }
 
 std::string NormalizePathString(const std::filesystem::path& p) {
@@ -70,17 +68,18 @@ bool IsDemoOrSampleProjectEntry(const std::string& name, const std::filesystem::
 }
 
 std::filesystem::path ResolveRecentProjectsFile() {
+    std::error_code ec;
 #ifdef KM_ASSETS_DIR
-    std::filesystem::path root = std::filesystem::path(KM_ASSETS_DIR).parent_path();
-    std::filesystem::path buildDir = root / "build";
-    if (std::filesystem::exists(buildDir)) {
-        return buildDir / "kyumist_projects.json";
+    const std::filesystem::path devRoot = std::filesystem::path(KM_ASSETS_DIR).parent_path();
+    const std::filesystem::path devBuild = devRoot / "build";
+    if (std::filesystem::exists(devBuild, ec) && PlatformPaths::IsDirectoryWritable(devBuild)) {
+        return devBuild / "kyumist_projects.json";
     }
 #endif
-    if (std::filesystem::exists("build")) {
+    if (std::filesystem::exists("build", ec) && PlatformPaths::IsDirectoryWritable("build")) {
         return std::filesystem::path("build/kyumist_projects.json");
     }
-    return std::filesystem::temp_directory_path() / "kyumist_projects.json";
+    return PlatformPaths::GetUserDataDir() / "kyumist_projects.json";
 }
 
 void SaveRecentProjects();
@@ -1455,11 +1454,7 @@ bool ProjectManager::ExportProjectBuild(const std::filesystem::path& outputDir, 
         }
     }
 
-#ifdef KM_JAVA_API_JAR
-    const std::filesystem::path jarSrc = KM_JAVA_API_JAR;
-#else
-    const std::filesystem::path jarSrc = buildDir / "java" / "kyumist-api.jar";
-#endif
+    const std::filesystem::path jarSrc = PlatformPaths::ResolveJavaApiJar();
     if (std::filesystem::exists(jarSrc, ec)) {
         std::filesystem::create_directories(outputDir / "java", ec);
         std::filesystem::copy_file(
@@ -1470,8 +1465,7 @@ bool ProjectManager::ExportProjectBuild(const std::filesystem::path& outputDir, 
         );
     }
 
-#ifdef KM_SHADER_DIR
-    const std::filesystem::path shadersSrc = KM_SHADER_DIR;
+    const std::filesystem::path shadersSrc = PlatformPaths::ResolveShadersDir();
     if (std::filesystem::exists(shadersSrc, ec)) {
         std::filesystem::create_directories(outputDir / "shaders", ec);
         for (const auto& entry : std::filesystem::directory_iterator(shadersSrc, ec)) {
@@ -1485,7 +1479,6 @@ bool ProjectManager::ExportProjectBuild(const std::filesystem::path& outputDir, 
             }
         }
     }
-#endif
 
     const std::string startScene = s_Proj.activeConfig.startScene.empty()
         ? "scenes/main.kmscene"

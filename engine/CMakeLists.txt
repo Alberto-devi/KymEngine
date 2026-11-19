@@ -66,7 +66,7 @@ target_link_libraries(kyumist_engine PUBLIC
 
 if(NOT WIN32)
     target_link_options(kyumist_engine PUBLIC
-        "-Wl,-rpath,${JVM_LIB_DIR}"
+        "-Wl,-rpath,$ORIGIN:$ORIGIN/../lib:$ORIGIN/jre/lib/server:${JVM_LIB_DIR}"
     )
 endif()
 

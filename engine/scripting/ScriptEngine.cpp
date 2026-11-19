@@ -2,6 +2,7 @@
 
 #include "audio/AudioEngine.hpp"
 #include "core/Log.hpp"
+#include "core/PlatformPaths.hpp"
 #include "core/Window.hpp"
 #include "physics/PhysicsSystem.hpp"
 #include "scene/Components.hpp"
@@ -43,40 +44,46 @@ struct ScriptEngineState {
 ScriptEngineState s_State;
 
 std::filesystem::path ResolveJavaApiJar() {
-#ifdef KM_JAVA_API_JAR
-    std::filesystem::path configured(KM_JAVA_API_JAR);
-    if (std::filesystem::exists(configured)) {
-        return configured;
-    }
-#endif
-    if (std::filesystem::exists("java/kyumist-api.jar")) {
-        return std::filesystem::path("java/kyumist-api.jar");
-    }
-    return std::filesystem::path("build/java/kyumist-api.jar");
+    return PlatformPaths::ResolveJavaApiJar();
 }
 
 std::filesystem::path ResolveScriptsSourceDir() {
     if (!s_State.scriptsDir.empty()) {
         return s_State.scriptsDir;
     }
-#ifdef KM_SCRIPTS_DIR
-    return std::filesystem::path(KM_SCRIPTS_DIR);
-#else
-    return std::filesystem::path("assets/scripts");
-#endif
+    return PlatformPaths::ResolveAssetsDir() / "scripts";
 }
 
 std::filesystem::path ResolveScriptsBuildDir() {
+    std::error_code ec;
 #ifdef KM_SCRIPTS_BUILD_DIR
-    return std::filesystem::path(KM_SCRIPTS_BUILD_DIR);
-#else
-    return std::filesystem::path("build/user-scripts-classes");
+    const std::filesystem::path devDir(KM_SCRIPTS_BUILD_DIR);
+    if (std::filesystem::exists(devDir.parent_path(), ec) && PlatformPaths::IsDirectoryWritable(devDir.parent_path())) {
+        return devDir;
+    }
 #endif
+    if (std::filesystem::exists("build", ec) && PlatformPaths::IsDirectoryWritable("build")) {
+        return std::filesystem::path("build/user-scripts-classes");
+    }
+    return std::filesystem::temp_directory_path(ec) / "KymEngine" / "user-scripts-classes";
 }
 
 std::string ResolveJavacExecutable() {
+    std::error_code ec;
+    if (const char* javaHome = std::getenv("JAVA_HOME")) {
+        if (*javaHome != '\0') {
+#ifdef _WIN32
+            const std::filesystem::path candidate = std::filesystem::path(javaHome) / "bin" / "javac.exe";
+#else
+            const std::filesystem::path candidate = std::filesystem::path(javaHome) / "bin" / "javac";
+#endif
+            if (std::filesystem::exists(candidate, ec)) {
+                return candidate.string();
+            }
+        }
+    }
 #ifdef KM_JAVAC_EXECUTABLE
-    if (std::filesystem::exists(KM_JAVAC_EXECUTABLE)) {
+    if (std::filesystem::exists(KM_JAVAC_EXECUTABLE, ec)) {
         return KM_JAVAC_EXECUTABLE;
     }
 #endif

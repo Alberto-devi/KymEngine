@@ -1,5 +1,6 @@
 #include "audio/AudioEngine.hpp"
 #include "core/Log.hpp"
+#include "core/PlatformPaths.hpp"
 
 #define MINIAUDIO_IMPLEMENTATION
 #include <miniaudio.h>
@@ -28,11 +29,7 @@ std::filesystem::path ResolveAssetsRoot() {
     if (!s_Audio.assetsDir.empty()) {
         return s_Audio.assetsDir;
     }
-#ifdef KM_ASSETS_DIR
-    return std::filesystem::path(KM_ASSETS_DIR);
-#else
-    return std::filesystem::path("assets");
-#endif
+    return PlatformPaths::ResolveAssetsDir();
 }
 
 std::filesystem::path ResolveAudioPath(const std::string& path) {

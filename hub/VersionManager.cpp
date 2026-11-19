@@ -167,15 +167,50 @@ std::vector<RemoteRelease> ParseReleasesJson(const std::filesystem::path& jsonFi
             rel.prerelease = item.value("prerelease", false);
 
             if (item.contains("assets") && item["assets"].is_array()) {
+#ifndef _WIN32
+                const bool runningAppImage = (std::getenv("APPIMAGE") != nullptr);
+                std::string fallbackInstallerName;
+                std::string fallbackInstallerUrl;
+                uint64_t fallbackInstallerSize = 0;
+#endif
                 for (const auto& asset : item["assets"]) {
                     const std::string name = asset.value("name", "");
+                    const std::string url = asset.value("browser_download_url", "");
+                    const uint64_t sz = asset.value("size", static_cast<uint64_t>(0));
                     if (EndsWith(name, kAssetSuffix)) {
                         rel.assetName = name;
-                        rel.downloadUrl = asset.value("browser_download_url", "");
-                        rel.assetSizeBytes = asset.value("size", static_cast<uint64_t>(0));
-                        break;
+                        rel.downloadUrl = url;
+                        rel.assetSizeBytes = sz;
                     }
+#ifdef _WIN32
+                    if (EndsWith(name, "win64-setup.exe")) {
+                        rel.hubInstallerName = name;
+                        rel.hubInstallerUrl = url;
+                        rel.hubInstallerSizeBytes = sz;
+                    }
+#else
+                    if (runningAppImage && EndsWith(name, ".AppImage")) {
+                        rel.hubInstallerName = name;
+                        rel.hubInstallerUrl = url;
+                        rel.hubInstallerSizeBytes = sz;
+                    } else if (!runningAppImage && EndsWith(name, "_amd64.deb")) {
+                        rel.hubInstallerName = name;
+                        rel.hubInstallerUrl = url;
+                        rel.hubInstallerSizeBytes = sz;
+                    } else if (EndsWith(name, ".AppImage") || EndsWith(name, "_amd64.deb")) {
+                        fallbackInstallerName = name;
+                        fallbackInstallerUrl = url;
+                        fallbackInstallerSize = sz;
+                    }
+#endif
                 }
+#ifndef _WIN32
+                if (rel.hubInstallerUrl.empty() && !fallbackInstallerUrl.empty()) {
+                    rel.hubInstallerName = std::move(fallbackInstallerName);
+                    rel.hubInstallerUrl = std::move(fallbackInstallerUrl);
+                    rel.hubInstallerSizeBytes = fallbackInstallerSize;
+                }
+#endif
             }
 
             if (!rel.version.empty() && !rel.downloadUrl.empty()) {
@@ -856,6 +891,189 @@ bool VersionManager::UpdateProjectEngineVersion(
     }
     out << pjson.dump(2) << '\n';
     return true;
+}
+
+int VersionManager::CompareVersions(const std::string& a, const std::string& b) {
+    auto parse = [](const std::string& v, std::vector<int>& nums, bool& hasPre) {
+        const size_t dash = v.find('-');
+        hasPre = (dash != std::string::npos);
+        const std::string core = (dash == std::string::npos) ? v : v.substr(0, dash);
+        size_t start = 0;
+        while (start < core.size()) {
+            size_t dot = core.find('.', start);
+            if (dot == std::string::npos) {
+                dot = core.size();
+            }
+            try {
+                nums.push_back(std::stoi(core.substr(start, dot - start)));
+            } catch (const std::exception&) {
+                nums.push_back(0);
+            }
+            start = dot + 1;
+        }
+    };
+
+    std::vector<int> na, nb;
+    bool preA = false, preB = false;
+    parse(NormalizeVersionTag(a), na, preA);
+    parse(NormalizeVersionTag(b), nb, preB);
+
+    const size_t n = std::max(na.size(), nb.size());
+    na.resize(n, 0);
+    nb.resize(n, 0);
+    for (size_t i = 0; i < n; ++i) {
+        if (na[i] != nb[i]) {
+            return na[i] < nb[i] ? -1 : 1;
+        }
+    }
+    if (preA != preB) {
+        return preA ? -1 : 1;
+    }
+    return 0;
+}
+
+bool VersionManager::DownloadAndApplyHubUpdate(
+    const RemoteRelease& release,
+    bool* outShouldCloseHub,
+    std::string* outMessage,
+    std::string* outError
+) {
+    if (outShouldCloseHub) {
+        *outShouldCloseHub = false;
+    }
+    if (release.hubInstallerUrl.empty() || release.hubInstallerName.empty()) {
+        if (outError) {
+            *outError = "Esta release no incluye instalador de actualizacion para tu sistema.";
+        }
+        return false;
+    }
+
+    std::error_code ec;
+    std::filesystem::path downloadDir = std::filesystem::temp_directory_path(ec) / "KymEngineHubUpdate";
+#ifndef _WIN32
+    if (const char* home = std::getenv("HOME")) {
+        if (*home != '\0' && std::filesystem::exists(std::filesystem::path(home) / "Descargas", ec)) {
+            downloadDir = std::filesystem::path(home) / "Descargas";
+        } else if (*home != '\0' && std::filesystem::exists(std::filesystem::path(home) / "Downloads", ec)) {
+            downloadDir = std::filesystem::path(home) / "Downloads";
+        }
+    }
+#endif
+    std::filesystem::create_directories(downloadDir, ec);
+    const std::filesystem::path targetFile = downloadDir / release.hubInstallerName;
+
+    const std::string dlCmd =
+        "curl -fL --retry 2 --connect-timeout 15 "
+        "-H \"User-Agent: KymEngineHub\" "
+        "-o " + QuoteArg(PlatformPaths::PathToUtf8(targetFile)) + " " + QuoteArg(release.hubInstallerUrl);
+
+    const int dlRc = RunBlockingCommand(dlCmd);
+    if (dlRc != 0 || !std::filesystem::exists(targetFile, ec)) {
+        std::filesystem::remove(targetFile, ec);
+        if (outError) {
+            *outError = "No se pudo descargar la actualizacion del Hub (codigo " + std::to_string(dlRc) + ").";
+        }
+        return false;
+    }
+
+#ifdef _WIN32
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi{};
+    std::wstring cmdLine = QuoteArgW(targetFile.wstring());
+    const BOOL ok = ::CreateProcessW(
+        targetFile.wstring().c_str(),
+        cmdLine.data(),
+        nullptr,
+        nullptr,
+        FALSE,
+        CREATE_NEW_PROCESS_GROUP,
+        nullptr,
+        downloadDir.wstring().c_str(),
+        &si,
+        &pi
+    );
+    if (!ok) {
+        if (outError) {
+            *outError = "Instalador descargado en " + PlatformPaths::PathToUtf8(targetFile) +
+                        ", pero no se pudo abrir automaticamente.";
+        }
+        return false;
+    }
+    ::CloseHandle(pi.hProcess);
+    ::CloseHandle(pi.hThread);
+    if (outShouldCloseHub) {
+        *outShouldCloseHub = true;
+    }
+    if (outMessage) {
+        *outMessage = "Instalador iniciado; cerrando Hub para actualizar...";
+    }
+    return true;
+#else
+    if (const char* appImagePath = std::getenv("APPIMAGE")) {
+        if (*appImagePath != '\0' && EndsWith(release.hubInstallerName, ".AppImage")) {
+            ::chmod(targetFile.c_str(), 0755);
+            const std::filesystem::path currentAppImage(appImagePath);
+            std::filesystem::rename(targetFile, currentAppImage, ec);
+            if (ec) {
+                std::filesystem::copy_file(targetFile, currentAppImage, std::filesystem::copy_options::overwrite_existing, ec);
+                std::filesystem::remove(targetFile, ec);
+            }
+            if (!ec) {
+                ::chmod(currentAppImage.c_str(), 0755);
+                const pid_t pid = ::fork();
+                if (pid == 0) {
+                    ::setsid();
+                    const std::string exeStr = currentAppImage.string();
+                    char* const argv[] = {const_cast<char*>(exeStr.c_str()), nullptr};
+                    ::execv(exeStr.c_str(), argv);
+                    ::_exit(127);
+                }
+                if (outShouldCloseHub) {
+                    *outShouldCloseHub = true;
+                }
+                if (outMessage) {
+                    *outMessage = "AppImage actualizado; reiniciando KymEngine Hub...";
+                }
+                return true;
+            }
+        }
+    }
+
+    if (EndsWith(release.hubInstallerName, ".deb")) {
+        if (RunBlockingCommand("command -v pkexec >/dev/null 2>&1") == 0) {
+            const std::string pkCmd = "pkexec apt-get install -y " + QuoteArg(targetFile.string());
+            const int pkRc = RunBlockingCommand(pkCmd);
+            if (pkRc == 0) {
+                const pid_t pid = ::fork();
+                if (pid == 0) {
+                    ::setsid();
+                    char exe[] = "/usr/bin/kymengine";
+                    char* const argv[] = {exe, nullptr};
+                    ::execv(exe, argv);
+                    ::_exit(127);
+                }
+                if (outShouldCloseHub) {
+                    *outShouldCloseHub = true;
+                }
+                if (outMessage) {
+                    *outMessage = "Hub actualizado correctamente; reiniciando...";
+                }
+                return true;
+            }
+        }
+        if (outMessage) {
+            *outMessage = "Descargado en " + targetFile.string() +
+                          ". Ejecuta: sudo apt install \"" + targetFile.string() + "\"";
+        }
+        return true;
+    }
+
+    if (outMessage) {
+        *outMessage = "Actualizacion descargada en: " + targetFile.string();
+    }
+    return true;
+#endif
 }
 
 } // namespace Kyumist::Hub

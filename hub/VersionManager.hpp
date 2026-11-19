@@ -29,6 +29,9 @@ struct RemoteRelease {
     std::string assetName;
     std::string downloadUrl;
     uint64_t assetSizeBytes = 0;
+    std::string hubInstallerName;
+    std::string hubInstallerUrl;
+    uint64_t hubInstallerSizeBytes = 0;
     bool prerelease = false;
 };
 
@@ -70,6 +73,14 @@ public:
     static bool UpdateProjectEngineVersion(
         const std::filesystem::path& projectFile,
         const std::string& newVersion,
+        std::string* outError = nullptr
+    );
+
+    static int CompareVersions(const std::string& a, const std::string& b);
+    static bool DownloadAndApplyHubUpdate(
+        const RemoteRelease& release,
+        bool* outShouldCloseHub,
+        std::string* outMessage = nullptr,
         std::string* outError = nullptr
     );
 };

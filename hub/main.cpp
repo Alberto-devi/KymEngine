@@ -155,17 +155,73 @@ private:
         });
     }
 
+    void StartHubSelfUpdate() {
+        if (m_IsUpdatingHub || !m_HasHubUpdate) {
+            return;
+        }
+        m_IsUpdatingHub = true;
+        m_StatusMessage = "Descargando actualizacion del Hub v" + m_AvailableHubUpdate.version + "...";
+        const auto rel = m_AvailableHubUpdate;
+        m_HubUpdateFuture = std::async(std::launch::async, [this, rel]() {
+            bool shouldClose = false;
+            std::string msg;
+            std::string err;
+            const bool ok = Kyumist::Hub::VersionManager::DownloadAndApplyHubUpdate(rel, &shouldClose, &msg, &err);
+            std::lock_guard<std::mutex> lock(m_AsyncMutex);
+            m_HubUpdateShouldClose = shouldClose;
+            m_PendingHubUpdateMsg = ok ? msg : err;
+            return ok;
+        });
+    }
+
     void PollAsyncTasks() {
         if (m_IsFetchingReleases && m_FetchFuture.valid() &&
             m_FetchFuture.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
             m_RemoteReleases = m_FetchFuture.get();
             m_IsFetchingReleases = false;
+
+            m_HasHubUpdate = false;
+            for (const auto& rel : m_RemoteReleases) {
+                if (rel.prerelease || rel.hubInstallerUrl.empty()) {
+                    continue;
+                }
+                if (Kyumist::Hub::VersionManager::CompareVersions(rel.version, KM_ENGINE_VERSION) > 0) {
+                    if (!m_HasHubUpdate ||
+                        Kyumist::Hub::VersionManager::CompareVersions(rel.version, m_AvailableHubUpdate.version) > 0) {
+                        m_AvailableHubUpdate = rel;
+                        m_HasHubUpdate = true;
+                    }
+                }
+            }
+
             std::lock_guard<std::mutex> lock(m_AsyncMutex);
             if (!m_PendingFetchError.empty()) {
                 m_StatusMessage = m_PendingFetchError;
                 m_PendingFetchError.clear();
             } else {
                 m_StatusMessage = "Versiones actualizadas desde GitHub.";
+            }
+        }
+
+        if (m_IsUpdatingHub && m_HubUpdateFuture.valid() &&
+            m_HubUpdateFuture.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+            const bool ok = m_HubUpdateFuture.get();
+            m_IsUpdatingHub = false;
+            bool shouldClose = false;
+            std::string msg;
+            {
+                std::lock_guard<std::mutex> lock(m_AsyncMutex);
+                shouldClose = m_HubUpdateShouldClose;
+                msg = m_PendingHubUpdateMsg;
+                m_PendingHubUpdateMsg.clear();
+            }
+            if (!msg.empty()) {
+                m_StatusMessage = msg;
+            } else if (!ok) {
+                m_StatusMessage = "No se pudo actualizar el Hub.";
+            }
+            if (ok && shouldClose) {
+                RequestClose();
             }
         }
 
@@ -257,11 +313,38 @@ private:
             ImGui::TextWrapped("Descargando y extrayendo paquete desde GitHub...");
         }
 
+        if (m_HasHubUpdate) {
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::TextColored(ImVec4(0.35f, 0.92f, 0.50f, 1.0f), "Hub v%s disponible", m_AvailableHubUpdate.version.c_str());
+            ImGui::BeginDisabled(m_IsUpdatingHub || m_IsInstalling);
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.16f, 0.56f, 0.34f, 1.0f));
+            if (ImGui::Button(m_IsUpdatingHub ? "Actualizando..." : "Actualizar Hub", ImVec2(-1.0f, 32.0f))) {
+                StartHubSelfUpdate();
+            }
+            ImGui::PopStyleColor();
+            ImGui::EndDisabled();
+        }
+
         ImGui::EndChild();
     }
 
     void RenderMainContent() {
         ImGui::BeginChild("##HubContent", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None);
+
+        if (m_HasHubUpdate) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.35f, 0.92f, 0.50f, 1.0f));
+            ImGui::Text("Nueva version de KymEngine Hub disponible: v%s (actual: v%s)",
+                        m_AvailableHubUpdate.version.c_str(), KM_ENGINE_VERSION);
+            ImGui::PopStyleColor();
+            ImGui::SameLine();
+            ImGui::BeginDisabled(m_IsUpdatingHub || m_IsInstalling);
+            if (ImGui::SmallButton(m_IsUpdatingHub ? "Descargando..." : "Actualizar Launcher")) {
+                StartHubSelfUpdate();
+            }
+            ImGui::EndDisabled();
+            ImGui::Separator();
+        }
 
         if (!m_StatusMessage.empty()) {
             ImGui::TextColored(ImVec4(0.75f, 0.88f, 1.0f, 1.0f), "%s", m_StatusMessage.c_str());
@@ -683,6 +766,13 @@ private:
     std::future<bool> m_InstallFuture;
     std::string m_InstallingVersion;
     std::filesystem::path m_PendingOpenAfterInstall;
+
+    bool m_HasHubUpdate = false;
+    Kyumist::Hub::RemoteRelease m_AvailableHubUpdate;
+    std::atomic<bool> m_IsUpdatingHub{false};
+    std::future<bool> m_HubUpdateFuture;
+    bool m_HubUpdateShouldClose = false;
+    std::string m_PendingHubUpdateMsg;
 
     std::mutex m_AsyncMutex;
     std::string m_PendingFetchError;

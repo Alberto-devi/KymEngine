@@ -70,6 +70,16 @@ std::filesystem::path ResolveScriptsBuildDir() {
 
 std::string ResolveJavacExecutable() {
     std::error_code ec;
+    const std::filesystem::path exeDir = PlatformPaths::GetExecutableDir();
+#ifdef _WIN32
+    const std::filesystem::path bundledJavac = exeDir / "jre" / "bin" / "javac.exe";
+#else
+    const std::filesystem::path bundledJavac = exeDir / "jre" / "bin" / "javac";
+#endif
+    if (std::filesystem::exists(bundledJavac, ec)) {
+        return PlatformPaths::PathToUtf8(bundledJavac);
+    }
+
     if (const char* javaHome = std::getenv("JAVA_HOME")) {
         if (*javaHome != '\0') {
 #ifdef _WIN32

@@ -119,10 +119,16 @@ jobs:
           Copy-Item build\runtime\Release\KyumistRuntime.exe dist\KymEngine-windows-x64\
           Copy-Item build\java\kyumist-api.jar dist\KymEngine-windows-x64\java\
           Copy-Item -Recurse assets,examples,Documentacion,LICENSE dist\KymEngine-windows-x64\
+          & "$env:JAVA_HOME\bin\jlink.exe" --add-modules java.base,java.logging,jdk.compiler --output dist\KymEngine-windows-x64\jre --strip-debug --no-man-pages --no-header-files --compress=2
           @(
             '@echo off',
             'cd /d "%~dp0"',
-            'if defined JAVA_HOME set "PATH=%JAVA_HOME%\bin\server;%JAVA_HOME%\bin;%PATH%"',
+            'if exist "%~dp0jre\bin\server\jvm.dll" (',
+            '  set "JAVA_HOME=%~dp0jre"',
+            '  set "PATH=%~dp0jre\bin\server;%~dp0jre\bin;%PATH%"',
+            ') else if defined JAVA_HOME (',
+            '  set "PATH=%JAVA_HOME%\bin\server;%JAVA_HOME%\bin;%PATH%"',
+            ')',
             'start "" "KymEngineHub.exe" %*'
           ) | Set-Content -Encoding ASCII dist\KymEngine-windows-x64\KymEngine.bat
           Compress-Archive -Path dist\KymEngine-windows-x64 -DestinationPath KymEngine-windows-x64.zip

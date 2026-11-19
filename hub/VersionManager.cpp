@@ -462,6 +462,45 @@ std::wstring QuoteArgW(const std::wstring& arg) {
     out += L'"';
     return out;
 }
+
+std::filesystem::path FindWindowsJavaHome(const std::filesystem::path& editorWorkDir) {
+    std::error_code ec;
+    auto hasJvmDll = [&](const std::filesystem::path& home) -> bool {
+        return std::filesystem::exists(home / "bin" / "server" / "jvm.dll", ec);
+    };
+
+    if (hasJvmDll(editorWorkDir / "jre")) {
+        return editorWorkDir / "jre";
+    }
+    const std::filesystem::path hubJre = PlatformPaths::GetExecutableDir() / "jre";
+    if (hasJvmDll(hubJre)) {
+        return hubJre;
+    }
+    if (const wchar_t* envHome = _wgetenv(L"JAVA_HOME")) {
+        if (*envHome != L'\0' && hasJvmDll(envHome)) {
+            return envHome;
+        }
+    }
+
+    const std::filesystem::path searchRoots[] = {
+        L"C:\\Program Files\\Eclipse Adoptium",
+        L"C:\\Program Files\\Java",
+        L"C:\\Program Files\\Microsoft",
+        L"C:\\Program Files\\Amazon Corretto",
+        L"C:\\Program Files\\Zulu"
+    };
+    for (const auto& root : searchRoots) {
+        if (!std::filesystem::exists(root, ec) || !std::filesystem::is_directory(root, ec)) {
+            continue;
+        }
+        for (const auto& sub : std::filesystem::directory_iterator(root, ec)) {
+            if (sub.is_directory(ec) && hasJvmDll(sub.path())) {
+                return sub.path();
+            }
+        }
+    }
+    return {};
+}
 #endif
 
 bool VersionManager::LaunchEditor(
@@ -480,6 +519,20 @@ bool VersionManager::LaunchEditor(
     const std::filesystem::path workDir = editorExe.parent_path();
 
 #ifdef _WIN32
+    const std::filesystem::path javaHome = FindWindowsJavaHome(workDir);
+    if (!javaHome.empty()) {
+        ::SetEnvironmentVariableW(L"JAVA_HOME", javaHome.wstring().c_str());
+        const wchar_t* oldPath = _wgetenv(L"PATH");
+        std::wstring newPath =
+            (javaHome / "bin" / "server").wstring() + L";" +
+            (javaHome / "bin").wstring();
+        if (oldPath && *oldPath != L'\0') {
+            newPath += L";";
+            newPath += oldPath;
+        }
+        ::SetEnvironmentVariableW(L"PATH", newPath.c_str());
+    }
+
     std::wstring cmdLine = QuoteArgW(editorExe.wstring());
     if (!projectFile.empty()) {
         cmdLine += L" --project " + QuoteArgW(projectFile.wstring());

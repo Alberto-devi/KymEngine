@@ -9,7 +9,7 @@ target_link_libraries(KymEngineHub PRIVATE
 )
 
 if(WIN32)
-    target_link_libraries(KymEngineHub PRIVATE shell32)
+    target_link_libraries(KymEngineHub PRIVATE shell32 ole32 uuid)
     set_target_properties(KymEngineHub PROPERTIES
         WIN32_EXECUTABLE FALSE
     )

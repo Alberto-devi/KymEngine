@@ -18,6 +18,7 @@
 #endif
 #include <windows.h>
 #include <shellapi.h>
+#include <shobjidl.h>
 #else
 #include <sys/stat.h>
 #include <sys/wait.h>
@@ -1070,6 +1071,133 @@ bool VersionManager::DownloadAndApplyHubUpdate(
         *outMessage = "Actualizacion descargada en: " + targetFile.string();
     }
     return true;
+#endif
+}
+
+bool VersionManager::DeleteProjectFromDisk(const std::filesystem::path& projectFile, std::string* outError) {
+    std::error_code ec;
+    if (projectFile.empty()) {
+        if (outError) {
+            *outError = "Ruta de proyecto invalida.";
+        }
+        return false;
+    }
+
+    const std::filesystem::path projectDir = projectFile.has_filename() && projectFile.filename() == "project.kmproj"
+        ? projectFile.parent_path()
+        : projectFile;
+
+    if (projectDir.empty() || !projectDir.has_parent_path() || projectDir == projectDir.root_path()) {
+        if (outError) {
+            *outError = "Ruta de proyecto insegura para borrar.";
+        }
+        return false;
+    }
+
+    RemoveProject(projectFile);
+
+    if (std::filesystem::exists(projectDir, ec)) {
+        std::filesystem::remove_all(projectDir, ec);
+        if (ec) {
+            if (outError) {
+                *outError = "No se pudo borrar la carpeta del proyecto: " + ec.message();
+            }
+            return false;
+        }
+    }
+    return true;
+}
+
+std::string VersionManager::PickFolderDialog(const std::string& title, const std::filesystem::path& initialDir) {
+#ifdef _WIN32
+    std::string selected;
+    const HRESULT hrInit = ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    const bool needUninit = SUCCEEDED(hrInit);
+
+    IFileOpenDialog* dlg = nullptr;
+    if (SUCCEEDED(::CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_ALL, IID_PPV_ARGS(&dlg))) && dlg) {
+        DWORD options = 0;
+        if (SUCCEEDED(dlg->GetOptions(&options))) {
+            dlg->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
+        }
+        if (!title.empty()) {
+            const int len = ::MultiByteToWideChar(CP_UTF8, 0, title.c_str(), -1, nullptr, 0);
+            if (len > 0) {
+                std::wstring wTitle(static_cast<size_t>(len), L'\0');
+                ::MultiByteToWideChar(CP_UTF8, 0, title.c_str(), -1, wTitle.data(), len);
+                dlg->SetTitle(wTitle.c_str());
+            }
+        }
+        std::error_code ec;
+        if (!initialDir.empty() && std::filesystem::exists(initialDir, ec)) {
+            IShellItem* startItem = nullptr;
+            if (SUCCEEDED(::SHCreateItemFromParsingName(initialDir.wstring().c_str(), nullptr, IID_PPV_ARGS(&startItem))) && startItem) {
+                dlg->SetFolder(startItem);
+                startItem->Release();
+            }
+        }
+        if (SUCCEEDED(dlg->Show(nullptr))) {
+            IShellItem* resultItem = nullptr;
+            if (SUCCEEDED(dlg->GetResult(&resultItem)) && resultItem) {
+                PWSTR pszPath = nullptr;
+                if (SUCCEEDED(resultItem->GetDisplayName(SIGDN_FILESYSPATH, &pszPath)) && pszPath) {
+                    selected = PlatformPaths::PathToUtf8(std::filesystem::path(pszPath));
+                    ::CoTaskMemFree(pszPath);
+                }
+                resultItem->Release();
+            }
+        }
+        dlg->Release();
+    }
+
+    if (needUninit) {
+        ::CoUninitialize();
+    }
+    return selected;
+#else
+    auto runPicker = [](const std::string& cmd) -> std::string {
+        FILE* pipe = ::popen(cmd.c_str(), "r");
+        if (!pipe) {
+            return {};
+        }
+        std::string out;
+        char buf[512];
+        while (std::fgets(buf, static_cast<int>(sizeof(buf)), pipe) != nullptr) {
+            out += buf;
+        }
+        const int rc = ::pclose(pipe);
+        if (rc != 0) {
+            return {};
+        }
+        while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) {
+            out.pop_back();
+        }
+        return out;
+    };
+
+    std::string initArg;
+    std::error_code ec;
+    if (!initialDir.empty() && std::filesystem::exists(initialDir, ec)) {
+        initArg = initialDir.string();
+        if (!initArg.empty() && initArg.back() != '/') {
+            initArg += '/';
+        }
+    }
+
+    if (RunBlockingCommand("command -v zenity >/dev/null 2>&1") == 0) {
+        std::string cmd = "zenity --file-selection --directory --title=" + QuoteArg(title);
+        if (!initArg.empty()) {
+            cmd += " --filename=" + QuoteArg(initArg);
+        }
+        cmd += " 2>/dev/null";
+        return runPicker(cmd);
+    }
+    if (RunBlockingCommand("command -v kdialog >/dev/null 2>&1") == 0) {
+        std::string cmd = "kdialog --getexistingdirectory " + QuoteArg(initArg.empty() ? "." : initArg) +
+                          " --title " + QuoteArg(title) + " 2>/dev/null";
+        return runPicker(cmd);
+    }
+    return {};
 #endif
 }
 

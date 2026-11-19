@@ -70,6 +70,8 @@ public:
     static std::vector<HubProjectEntry> LoadProjects();
     static bool AddProject(const std::filesystem::path& projectFileOrDir, std::string* outError = nullptr);
     static void RemoveProject(const std::filesystem::path& projectFile);
+    static bool DeleteProjectFromDisk(const std::filesystem::path& projectFile, std::string* outError = nullptr);
+    static std::string PickFolderDialog(const std::string& title, const std::filesystem::path& initialDir = {});
     static bool UpdateProjectEngineVersion(
         const std::filesystem::path& projectFile,
         const std::string& newVersion,

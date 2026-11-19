@@ -101,6 +101,7 @@ protected:
         RenderAddExistingModal();
         RenderMissingVersionModal();
         RenderChangeVersionModal();
+        RenderDeleteProjectModal();
 
         ImGui::End();
     }
@@ -387,8 +388,8 @@ private:
         if (ImGui::BeginTable("##ProjectsTable", 4, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY)) {
             ImGui::TableSetupColumn("Proyecto", ImGuiTableColumnFlags_WidthStretch, 0.45f);
             ImGui::TableSetupColumn("Version del Motor", ImGuiTableColumnFlags_WidthFixed, 170.0f);
-            ImGui::TableSetupColumn("Estado", ImGuiTableColumnFlags_WidthFixed, 130.0f);
-            ImGui::TableSetupColumn("Acciones", ImGuiTableColumnFlags_WidthFixed, 230.0f);
+            ImGui::TableSetupColumn("Estado", ImGuiTableColumnFlags_WidthFixed, 120.0f);
+            ImGui::TableSetupColumn("Acciones", ImGuiTableColumnFlags_WidthFixed, 255.0f);
             ImGui::TableHeadersRow();
 
             std::filesystem::path pendingRemove;
@@ -423,14 +424,22 @@ private:
 
                 ImGui::TableSetColumnIndex(3);
                 ImGui::BeginDisabled(!proj.fileExists || m_IsInstalling);
-                if (ImGui::Button("Abrir", ImVec2(90.0f, 0.0f))) {
+                if (ImGui::Button("Abrir", ImVec2(78.0f, 0.0f))) {
                     TryOpenProject(proj);
                 }
                 ImGui::EndDisabled();
                 ImGui::SameLine();
-                if (ImGui::Button("Quitar", ImVec2(70.0f, 0.0f))) {
+                if (ImGui::Button("Quitar", ImVec2(68.0f, 0.0f))) {
                     pendingRemove = proj.projectFile;
                 }
+                ImGui::SameLine();
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.62f, 0.18f, 0.18f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.78f, 0.24f, 0.24f, 1.0f));
+                if (ImGui::Button("Borrar", ImVec2(68.0f, 0.0f))) {
+                    m_DeleteProjectTarget = proj;
+                    m_OpenDeleteProjectModal = true;
+                }
+                ImGui::PopStyleColor(2);
 
                 ImGui::PopID();
             }
@@ -574,6 +583,17 @@ private:
 
         ImGui::InputText("Nombre", m_NewProjectName.data(), m_NewProjectName.size());
         ImGui::InputText("Carpeta padre", m_NewProjectParent.data(), m_NewProjectParent.size());
+        ImGui::SameLine();
+        if (ImGui::Button("Examinar...##NewProjDir")) {
+            const std::string picked = Kyumist::Hub::VersionManager::PickFolderDialog(
+                "Seleccionar carpeta para el nuevo proyecto",
+                Kyumist::PlatformPaths::Utf8ToPath(m_NewProjectParent.data())
+            );
+            if (!picked.empty()) {
+                std::strncpy(m_NewProjectParent.data(), picked.c_str(), m_NewProjectParent.size() - 1);
+                m_NewProjectParent.back() = '\0';
+            }
+        }
 
         const char* templates[] = {
             "Hibrido 3D + 2D (Aether Guardian - Demo)",
@@ -642,8 +662,19 @@ private:
             return;
         }
         ImGui::TextUnformatted("Ruta a la carpeta del proyecto o al archivo project.kmproj:");
-        ImGui::SetNextItemWidth(460.0f);
+        ImGui::SetNextItemWidth(390.0f);
         ImGui::InputText("##ExistingPath", m_AddExistingPath.data(), m_AddExistingPath.size());
+        ImGui::SameLine();
+        if (ImGui::Button("Examinar...##ExistingProjDir")) {
+            const std::string picked = Kyumist::Hub::VersionManager::PickFolderDialog(
+                "Seleccionar carpeta del proyecto existente",
+                GetDefaultProjectsParentDir()
+            );
+            if (!picked.empty()) {
+                std::strncpy(m_AddExistingPath.data(), picked.c_str(), m_AddExistingPath.size() - 1);
+                m_AddExistingPath.back() = '\0';
+            }
+        }
 
         if (ImGui::Button("Anadir", ImVec2(110.0f, 0.0f))) {
             std::string err;
@@ -758,6 +789,43 @@ private:
         ImGui::EndPopup();
     }
 
+    void RenderDeleteProjectModal() {
+        if (m_OpenDeleteProjectModal) {
+            ImGui::OpenPopup("Confirmar borrado de proyecto");
+            m_OpenDeleteProjectModal = false;
+        }
+        if (!ImGui::BeginPopupModal("Confirmar borrado de proyecto", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            return;
+        }
+
+        const std::filesystem::path projDir = m_DeleteProjectTarget.projectFile.parent_path();
+        ImGui::Text("Vas a eliminar permanentemente el proyecto '%s'.", m_DeleteProjectTarget.name.c_str());
+        ImGui::TextDisabled("Carpeta: %s", Kyumist::PlatformPaths::PathToUtf8(projDir).c_str());
+        ImGui::Spacing();
+        ImGui::TextColored(ImVec4(0.96f, 0.35f, 0.35f, 1.0f),
+                           "Se borraran todos los archivos de esta carpeta. Esta accion no se puede deshacer.");
+        ImGui::Spacing();
+
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.72f, 0.16f, 0.16f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.88f, 0.22f, 0.22f, 1.0f));
+        if (ImGui::Button("Si, borrar proyecto", ImVec2(165.0f, 0.0f))) {
+            std::string err;
+            if (Kyumist::Hub::VersionManager::DeleteProjectFromDisk(m_DeleteProjectTarget.projectFile, &err)) {
+                m_StatusMessage = "Proyecto '" + m_DeleteProjectTarget.name + "' eliminado del disco.";
+            } else {
+                m_StatusMessage = err;
+            }
+            RefreshLocalState();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::PopStyleColor(2);
+        ImGui::SameLine();
+        if (ImGui::Button("Cancelar", ImVec2(110.0f, 0.0f))) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
     HubTab m_ActiveTab = HubTab::Projects;
     std::vector<Kyumist::Hub::InstalledEditor> m_Installed;
     std::vector<Kyumist::Hub::RemoteRelease> m_RemoteReleases;
@@ -801,6 +869,9 @@ private:
     bool m_OpenChangeVersionModal = false;
     Kyumist::Hub::HubProjectEntry m_ChangeVersionProject;
     int m_ChangeVersionIdx = 0;
+
+    bool m_OpenDeleteProjectModal = false;
+    Kyumist::Hub::HubProjectEntry m_DeleteProjectTarget;
 };
 
 } // namespace

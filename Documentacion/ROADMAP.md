@@ -93,7 +93,7 @@ Este documento resume lo que ya está implementado y verificado en **Kyumist Eng
 
 ---
 
-## Fase 7 — v0.3.0: Input Map, UI HTML/CSS, Animación Esquelética glTF 2.0 y Exportación
+## Fase 7 — v0.3.0 / v0.3.1: Input Map, UI HTML/CSS, Animación Esquelética glTF 2.0 y Exportación
 - [x] **Sistema de `InputMap` (`input_map.json`)**: acciones configurables desde el editor y consultables en Java (`Input.isActionPressed`, `isActionJustPressed`, `isActionJustReleased`, `getAxis`).
 - [x] **UI HTML/CSS con RmlUi**: carga de documentos `.html` + `.css` (`UI.loadDocument`, `setText`, `setVisible`, `setClass`) con eventos `onUIEvent(elementId, eventType)` en `KyumistScript`.
 - [x] **Animación Esquelética glTF 2.0 (*Skinning*)**: parseo de `nodes`, `skins` (`JOINTS_0`, `WEIGHTS_0`, `inverseBindMatrices`), `animations` (`LINEAR`, `STEP`, `CUBICSPLINE`) y mallas emparentadas a huesos (`attachedNode`), componente `AnimatorComponent`, *vertex buffers* dinámicos por entidad en Vulkan y API Java (`Entity.playAnimation`, `stopAnimation`, `setAnimationSpeed`, `isAnimationPlaying`).

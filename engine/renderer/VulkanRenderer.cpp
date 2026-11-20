@@ -277,6 +277,11 @@ void VulkanRenderer::ClearModelCache() {
         DestroyMesh(mesh);
     }
     m_ObjMeshes.clear();
+    m_LoadedModels.clear();
+    for (auto& [key, dyn] : m_SkinnedEntityBuffers) {
+        DestroyDynamicSkinnedBuffer(dyn);
+    }
+    m_SkinnedEntityBuffers.clear();
     for (auto& [key, tex] : m_Textures) {
         DestroyTexture(tex);
     }
@@ -382,6 +387,11 @@ VulkanRenderer::~VulkanRenderer() {
         DestroyMesh(mesh);
     }
     m_ObjMeshes.clear();
+    m_LoadedModels.clear();
+    for (auto& [key, dyn] : m_SkinnedEntityBuffers) {
+        DestroyDynamicSkinnedBuffer(dyn);
+    }
+    m_SkinnedEntityBuffers.clear();
 
     if (m_Headless) {
         DestroyHeadlessTarget();
@@ -1057,6 +1067,75 @@ void VulkanRenderer::DestroyMesh(GpuMesh& mesh) {
     mesh.indexCount = 0;
 }
 
+void VulkanRenderer::DestroyDynamicSkinnedBuffer(DynamicSkinnedBuffer& dyn) {
+    if (m_Allocator != VK_NULL_HANDLE) {
+        for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+            if (dyn.vertexBuffers[i] != VK_NULL_HANDLE) {
+                vmaDestroyBuffer(m_Allocator, dyn.vertexBuffers[i], dyn.vertexAllocations[i]);
+                dyn.vertexBuffers[i] = VK_NULL_HANDLE;
+                dyn.vertexAllocations[i] = VK_NULL_HANDLE;
+                dyn.mapped[i] = nullptr;
+            }
+        }
+    }
+    dyn.vertexCapacity = 0;
+}
+
+VkBuffer VulkanRenderer::GetOrUpdateSkinnedVertexBuffer(
+    uint32_t entityKey,
+    const LoadedModelData& modelData,
+    const AnimatorComponent& anim
+) {
+    const uint32_t vertCount = static_cast<uint32_t>(modelData.bindVertices.size());
+    if (vertCount == 0) {
+        return VK_NULL_HANDLE;
+    }
+
+    auto& dyn = m_SkinnedEntityBuffers[entityKey];
+    if (dyn.vertexCapacity < vertCount) {
+        if (m_Device != VK_NULL_HANDLE) {
+            vkDeviceWaitIdle(m_Device);
+        }
+        DestroyDynamicSkinnedBuffer(dyn);
+
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+        allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+
+        VkBufferCreateInfo vbInfo{};
+        vbInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+        vbInfo.size = static_cast<VkDeviceSize>(vertCount) * sizeof(Vertex);
+        vbInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+        vbInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+        for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+            VmaAllocationInfo vbAllocInfo{};
+            CheckVkResult(
+                vmaCreateBuffer(m_Allocator, &vbInfo, &allocInfo, &dyn.vertexBuffers[i], &dyn.vertexAllocations[i], &vbAllocInfo),
+                "vmaCreateBuffer (skinned vertex)"
+            );
+            dyn.mapped[i] = vbAllocInfo.pMappedData;
+        }
+        dyn.vertexCapacity = vertCount;
+    }
+
+    ModelLoader::EvaluateSkinnedVertices(
+        modelData,
+        anim.currentAnimation,
+        anim.time,
+        anim.loop,
+        anim.autoPlayFirst,
+        m_SkinnedScratchVerts
+    );
+
+    const uint32_t frameIdx = m_CurrentFrame % MAX_FRAMES_IN_FLIGHT;
+    if (dyn.mapped[frameIdx] && m_SkinnedScratchVerts.size() == vertCount) {
+        std::memcpy(dyn.mapped[frameIdx], m_SkinnedScratchVerts.data(), static_cast<size_t>(vertCount) * sizeof(Vertex));
+        vmaFlushAllocation(m_Allocator, dyn.vertexAllocations[frameIdx], 0, VK_WHOLE_SIZE);
+    }
+    return dyn.vertexBuffers[frameIdx];
+}
+
 const VulkanRenderer::GpuMesh* VulkanRenderer::GetOrLoadObjMesh(const std::string& path) {
     if (path.empty()) {
         return &m_CubeMesh;
@@ -1091,6 +1170,11 @@ const VulkanRenderer::GpuMesh* VulkanRenderer::GetOrLoadObjMesh(const std::strin
     GpuMesh uploaded = UploadMesh(loaded.vertices, loaded.indices);
     auto [inserted, _] = m_ObjMeshes.emplace(path, uploaded);
     KM_CORE_INFO("Loaded 3D model '{}' ({} verts, {} indices).", resolved.string(), loaded.vertices.size(), uploaded.indexCount);
+    if (loaded.hasSkin) {
+        KM_CORE_INFO("  -> Skeletal skin detected: {} joints, {} animation clip(s).",
+            loaded.skeleton.jointNodeIndices.size(), loaded.skeleton.animations.size());
+    }
+    m_LoadedModels.emplace(path, std::move(loaded));
     return &inserted->second;
 }
 
@@ -1809,6 +1893,7 @@ void VulkanRenderer::RecordScenePass(VkCommandBuffer cmd) {
         // 1. Collect & Draw 3D meshes
         struct ShadowCaster {
             const GpuMesh* gpuMesh;
+            VkBuffer vertexBuffer;
             glm::mat4 world;
         };
         std::vector<ShadowCaster> shadowCasters;
@@ -1826,6 +1911,23 @@ void VulkanRenderer::RecordScenePass(VkCommandBuffer cmd) {
                 case MeshType::Sphere:    gpuMesh = &m_SphereMesh; break;
                 case MeshType::Plane:     gpuMesh = &m_PlaneMesh; break;
                 case MeshType::CustomOBJ: gpuMesh = GetOrLoadObjMesh(meshComp.objPath); break;
+            }
+
+            VkBuffer activeVertexBuffer = gpuMesh->vertexBuffer;
+            if (meshComp.type == MeshType::CustomOBJ && !meshComp.objPath.empty()) {
+                if (const auto* animComp = registry.try_get<AnimatorComponent>(entity)) {
+                    auto modelIt = m_LoadedModels.find(meshComp.objPath);
+                    if (modelIt != m_LoadedModels.end() && modelIt->second.hasSkin) {
+                        VkBuffer skinnedVb = GetOrUpdateSkinnedVertexBuffer(
+                            static_cast<uint32_t>(entity),
+                            modelIt->second,
+                            *animComp
+                        );
+                        if (skinnedVb != VK_NULL_HANDLE) {
+                            activeVertexBuffer = skinnedVb;
+                        }
+                    }
+                }
             }
 
             const glm::mat4 model = m_ActiveScene->GetWorldTransform(entity);
@@ -1873,12 +1975,12 @@ void VulkanRenderer::RecordScenePass(VkCommandBuffer cmd) {
                 &pc
             );
 
-            vkCmdBindVertexBuffers(cmd, 0, 1, &gpuMesh->vertexBuffer, &vbOffset);
+            vkCmdBindVertexBuffers(cmd, 0, 1, &activeVertexBuffer, &vbOffset);
             vkCmdBindIndexBuffer(cmd, gpuMesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
             vkCmdDrawIndexed(cmd, gpuMesh->indexCount, 1, 0, 0, 0);
 
             if (meshComp.castShadows && meshComp.type != MeshType::Plane && model[3].y > 0.05f) {
-                shadowCasters.push_back({gpuMesh, model});
+                shadowCasters.push_back({gpuMesh, activeVertexBuffer, model});
             }
         }
 
@@ -1923,7 +2025,7 @@ void VulkanRenderer::RecordScenePass(VkCommandBuffer cmd) {
                     &shadowPc
                 );
 
-                vkCmdBindVertexBuffers(cmd, 0, 1, &caster.gpuMesh->vertexBuffer, &vbOffset);
+                vkCmdBindVertexBuffers(cmd, 0, 1, &caster.vertexBuffer, &vbOffset);
                 vkCmdBindIndexBuffer(cmd, caster.gpuMesh->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
                 vkCmdDrawIndexed(cmd, caster.gpuMesh->indexCount, 1, 0, 0, 0);
             }

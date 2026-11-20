@@ -227,6 +227,9 @@ public:
         uint32_t w = 0;
         uint32_t h = 0;
         const uint64_t handle = m_Renderer->LoadUITextureFile(PlatformPaths::PathToUtf8(resolved), w, h);
+        if (handle == 0) {
+            KM_CORE_WARN("[RmlUi] Failed to load UI texture '{}' (resolved: '{}').", source, PlatformPaths::PathToUtf8(resolved));
+        }
         textureDimensions.x = static_cast<int>(w);
         textureDimensions.y = static_cast<int>(h);
         return static_cast<Rml::TextureHandle>(handle);

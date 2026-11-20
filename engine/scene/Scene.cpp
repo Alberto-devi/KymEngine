@@ -102,6 +102,19 @@ bool Scene::ComputePrimaryCameraViewProjection(float aspect, glm::mat4& outViewP
     return false;
 }
 
+void Scene::UpdateAnimations(float deltaSeconds) {
+    if (deltaSeconds <= 0.0f) {
+        return;
+    }
+    auto view = m_Registry.view<AnimatorComponent>();
+    for (auto entity : view) {
+        auto& anim = view.get<AnimatorComponent>(entity);
+        if (anim.playing) {
+            anim.time += deltaSeconds * anim.speed;
+        }
+    }
+}
+
 void Scene::CreateDefaultScene() {
     Clear();
 

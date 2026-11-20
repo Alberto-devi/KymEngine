@@ -52,4 +52,9 @@ public final class NativeBridge {
     public static native long raycast(float ox, float oy, float oz, float dx, float dy, float dz, float maxDistance);
 
     public static native void playSound(String relativePath, float volume);
+
+    public static native void playAnimation(long entityId, String animationName, boolean loop);
+    public static native void stopAnimation(long entityId);
+    public static native void setAnimationSpeed(long entityId, float speed);
+    public static native boolean isAnimationPlaying(long entityId);
 }

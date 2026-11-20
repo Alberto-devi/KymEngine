@@ -17,6 +17,7 @@ namespace Kyumist {
 
 class Scene;
 class Window;
+struct AnimatorComponent;
 
 struct DrawPushConstants {
     glm::mat4 model{1.0f};
@@ -78,6 +79,13 @@ private:
         uint32_t indexCount = 0;
     };
 
+    struct DynamicSkinnedBuffer {
+        std::array<VkBuffer, MAX_FRAMES_IN_FLIGHT> vertexBuffers{};
+        std::array<VmaAllocation, MAX_FRAMES_IN_FLIGHT> vertexAllocations{};
+        std::array<void*, MAX_FRAMES_IN_FLIGHT> mapped{};
+        uint32_t vertexCapacity = 0;
+    };
+
     struct GpuTexture {
         VkImage image = VK_NULL_HANDLE;
         VmaAllocation allocation = VK_NULL_HANDLE;
@@ -112,8 +120,14 @@ private:
     void CreateGraphicsPipeline();
     void CreateBuiltinMeshes();
     void DestroyMesh(GpuMesh& mesh);
+    void DestroyDynamicSkinnedBuffer(DynamicSkinnedBuffer& dyn);
     GpuMesh UploadMesh(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
     const GpuMesh* GetOrLoadObjMesh(const std::string& path);
+    VkBuffer GetOrUpdateSkinnedVertexBuffer(
+        uint32_t entityKey,
+        const LoadedModelData& modelData,
+        const AnimatorComponent& anim
+    );
 
     void CreateDefaultTextures();
     void DestroyTexture(GpuTexture& tex);
@@ -190,6 +204,9 @@ private:
     GpuMesh m_SphereMesh;
     GpuMesh m_PlaneMesh;
     std::unordered_map<std::string, GpuMesh> m_ObjMeshes;
+    std::unordered_map<std::string, LoadedModelData> m_LoadedModels;
+    std::unordered_map<uint32_t, DynamicSkinnedBuffer> m_SkinnedEntityBuffers;
+    std::vector<Vertex> m_SkinnedScratchVerts;
 
     GpuTexture m_WhiteTexture;
     std::unordered_map<std::string, GpuTexture> m_Textures;

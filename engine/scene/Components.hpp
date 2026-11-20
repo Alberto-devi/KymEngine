@@ -136,5 +136,14 @@ struct UITextComponent {
     bool visible = true;
 };
 
+struct AnimatorComponent {
+    std::string currentAnimation;
+    float time = 0.0f;
+    float speed = 1.0f;
+    bool loop = true;
+    bool playing = true;
+    bool autoPlayFirst = true;
+};
+
 } // namespace Kyumist
 

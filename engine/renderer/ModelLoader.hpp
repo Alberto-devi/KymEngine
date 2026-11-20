@@ -1,6 +1,7 @@
 #pragma once
 
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include <cstdint>
 #include <filesystem>
@@ -27,11 +28,66 @@ struct PBRMaterialData {
     glm::vec3 emissive{0.0f, 0.0f, 0.0f};
 };
 
+struct SkinVertexWeight {
+    glm::ivec4 joints{-1, 0, 0, 0};
+    glm::vec4 weights{0.0f, 0.0f, 0.0f, 0.0f};
+    int attachedNode = -1;
+};
+
+struct SkeletonNode {
+    std::string name;
+    int parentIndex = -1;
+    std::vector<int> children;
+    glm::vec3 bindTranslation{0.0f, 0.0f, 0.0f};
+    glm::quat bindRotation{1.0f, 0.0f, 0.0f, 0.0f};
+    glm::vec3 bindScale{1.0f, 1.0f, 1.0f};
+    bool hasBindMatrix = false;
+    glm::mat4 bindMatrix{1.0f};
+};
+
+enum class AnimationPathType {
+    Translation = 0,
+    Rotation = 1,
+    Scale = 2
+};
+
+enum class AnimationInterpolation {
+    Linear = 0,
+    Step = 1
+};
+
+struct AnimationChannelData {
+    int targetNode = -1;
+    AnimationPathType path = AnimationPathType::Translation;
+    AnimationInterpolation interpolation = AnimationInterpolation::Linear;
+    std::vector<float> times;
+    std::vector<glm::vec4> values;
+};
+
+struct AnimationClipData {
+    std::string name;
+    float duration = 0.0f;
+    std::vector<AnimationChannelData> channels;
+};
+
+struct SkeletonData {
+    std::vector<SkeletonNode> nodes;
+    std::vector<int> rootNodes;
+    std::vector<int> jointNodeIndices;
+    std::vector<glm::mat4> inverseBindMatrices;
+    std::vector<AnimationClipData> animations;
+};
+
 struct LoadedModelData {
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
     PBRMaterialData primaryMaterial;
     bool hasMaterial = false;
+
+    bool hasSkin = false;
+    std::vector<Vertex> bindVertices;
+    std::vector<SkinVertexWeight> skinWeights;
+    SkeletonData skeleton;
 };
 
 struct ImageData {
@@ -43,6 +99,15 @@ struct ImageData {
 class ModelLoader {
 public:
     static bool LoadModel(const std::filesystem::path& path, LoadedModelData& outData);
+    static void EvaluateSkinnedVertices(
+        const LoadedModelData& model,
+        const std::string& animationName,
+        float timeSeconds,
+        bool loop,
+        bool autoPlayFirst,
+        std::vector<Vertex>& outVertices,
+        bool* outFinished = nullptr
+    );
     static bool LoadMaterialFile(const std::filesystem::path& path, PBRMaterialData& outMat);
     static bool SaveMaterialFile(const std::filesystem::path& path, const PBRMaterialData& mat);
 

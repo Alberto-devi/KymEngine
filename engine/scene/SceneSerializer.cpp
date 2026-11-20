@@ -127,6 +127,16 @@ nlohmann::json SerializeEntityJson(const entt::registry& registry, entt::entity 
             {"visible", mesh->visible}
         };
     }
+    if (const auto* anim = registry.try_get<AnimatorComponent>(entity)) {
+        entityJson["animator"] = {
+            {"currentAnimation", anim->currentAnimation},
+            {"time", anim->time},
+            {"speed", anim->speed},
+            {"loop", anim->loop},
+            {"playing", anim->playing},
+            {"autoPlayFirst", anim->autoPlayFirst}
+        };
+    }
     if (const auto* sprite = registry.try_get<SpriteRendererComponent>(entity)) {
         entityJson["spriteRenderer"] = {
             {"texturePath", sprite->texturePath},
@@ -244,6 +254,17 @@ entt::entity DeserializeEntityJson(Scene& scene, const nlohmann::json& entityJso
         mesh.roughness = mJson.value("roughness", mesh.roughness);
         mesh.castShadows = mJson.value("castShadows", mesh.castShadows);
         mesh.visible = mJson.value("visible", mesh.visible);
+    }
+
+    if (entityJson.contains("animator")) {
+        const auto& aJson = entityJson["animator"];
+        auto& anim = registry.emplace<AnimatorComponent>(entity);
+        anim.currentAnimation = aJson.value("currentAnimation", anim.currentAnimation);
+        anim.time = aJson.value("time", anim.time);
+        anim.speed = aJson.value("speed", anim.speed);
+        anim.loop = aJson.value("loop", anim.loop);
+        anim.playing = aJson.value("playing", anim.playing);
+        anim.autoPlayFirst = aJson.value("autoPlayFirst", anim.autoPlayFirst);
     }
 
     if (entityJson.contains("spriteRenderer")) {

@@ -1930,7 +1930,54 @@ bool ProjectManager::ExportProjectForPlatform(const ExportOptions& options, std:
         (void)RunQuietCommand(injectCmd);
         std::filesystem::remove_all(stageRoot, ec);
 
-        // Sign with debug keystore if jarsigner/keytool are available
+        // Locate zipalign and apksigner (PATH or Android SDK build-tools)
+        auto findAndroidTool = [](const std::string& toolName) -> std::string {
+#ifndef _WIN32
+            if (RunQuietCommand("command -v " + toolName + " >/dev/null 2>&1")) {
+                return toolName;
+            }
+            std::vector<std::filesystem::path> sdkRoots;
+            if (const char* envHome = std::getenv("ANDROID_HOME")) {
+                sdkRoots.emplace_back(envHome);
+            }
+            if (const char* envSdk = std::getenv("ANDROID_SDK_ROOT")) {
+                sdkRoots.emplace_back(envSdk);
+            }
+            if (const char* home = std::getenv("HOME")) {
+                sdkRoots.push_back(std::filesystem::path(home) / "Android" / "Sdk");
+            }
+            std::error_code tec;
+            for (const auto& root : sdkRoots) {
+                const std::filesystem::path bt = root / "build-tools";
+                if (!std::filesystem::exists(bt, tec)) {
+                    continue;
+                }
+                for (const auto& verDir : std::filesystem::directory_iterator(bt, tec)) {
+                    const std::filesystem::path cand = verDir.path() / toolName;
+                    if (std::filesystem::is_regular_file(cand, tec)) {
+                        return QuoteShellArg(PlatformPaths::PathToUtf8(cand));
+                    }
+                }
+            }
+#endif
+            return {};
+        };
+
+        const std::string zipalignBin = findAndroidTool("zipalign");
+        if (!zipalignBin.empty()) {
+            const std::filesystem::path alignedApk = options.outputDir / (baseName + ".aligned.apk");
+            const std::string alignCmd =
+                zipalignBin + " -f -p 4 " +
+                QuoteShellArg(PlatformPaths::PathToUtf8(outApk)) + " " +
+                QuoteShellArg(PlatformPaths::PathToUtf8(alignedApk));
+            if (RunQuietCommand(alignCmd) && std::filesystem::exists(alignedApk, ec)) {
+                std::filesystem::rename(alignedApk, outApk, ec);
+            }
+        } else {
+            KM_WARN("zipalign no encontrado; el APK podria fallar en Android 11+ (instala 'zipalign').");
+        }
+
+        // Sign with debug keystore (prefer apksigner for v2/v3 required on Android 11+, fallback to jarsigner)
         const std::filesystem::path debugKeystore = PlatformPaths::GetUserDataDir() / "android_debug.keystore";
         if (!std::filesystem::exists(debugKeystore, ec)) {
             const std::string keyCmd =
@@ -1940,11 +1987,23 @@ bool ProjectManager::ExportProjectForPlatform(const ExportOptions& options, std:
             (void)RunQuietCommand(keyCmd);
         }
         if (std::filesystem::exists(debugKeystore, ec)) {
-            const std::string signCmd =
-                "jarsigner -keystore " + QuoteShellArg(PlatformPaths::PathToUtf8(debugKeystore)) +
-                " -storepass android -keypass android " +
-                QuoteShellArg(PlatformPaths::PathToUtf8(outApk)) + " kymdebug";
-            (void)RunQuietCommand(signCmd);
+            const std::string apksignerBin = findAndroidTool("apksigner");
+            if (!apksignerBin.empty()) {
+                const std::string signCmd =
+                    apksignerBin + " sign --ks " + QuoteShellArg(PlatformPaths::PathToUtf8(debugKeystore)) +
+                    " --ks-key-alias kymdebug --ks-pass pass:android --key-pass pass:android " +
+                    QuoteShellArg(PlatformPaths::PathToUtf8(outApk));
+                if (!RunQuietCommand(signCmd)) {
+                    KM_WARN("apksigner fallo al firmar '{}'.", PlatformPaths::PathToUtf8(outApk));
+                }
+            } else {
+                KM_WARN("apksigner no encontrado (usando jarsigner v1); Android 11+ requiere firma v2/v3 (instala 'apksigner').");
+                const std::string signCmd =
+                    "jarsigner -keystore " + QuoteShellArg(PlatformPaths::PathToUtf8(debugKeystore)) +
+                    " -storepass android -keypass android " +
+                    QuoteShellArg(PlatformPaths::PathToUtf8(outApk)) + " kymdebug";
+                (void)RunQuietCommand(signCmd);
+            }
         }
 
         KM_INFO("Proyecto '{}' exportado para Android en '{}'.",

@@ -490,6 +490,29 @@ struct GltfAccessorView {
         }
         return ReadGltfIndex(basePtr + index * stride, componentType);
     }
+
+    float GetScalar(size_t index, float fallback = 0.0f) const {
+        if (!IsValid() || index >= count) {
+            return fallback;
+        }
+        return ReadGltfComponentAsFloat(basePtr + index * stride, componentType, normalized);
+    }
+
+    glm::mat4 GetMat4(size_t index, const glm::mat4& fallback = glm::mat4(1.0f)) const {
+        if (!IsValid() || index >= count || componentCount < 16) {
+            return fallback;
+        }
+        glm::mat4 mat(1.0f);
+        const size_t compSize = static_cast<size_t>(ComponentTypeSizeBytes(componentType));
+        const uint8_t* elem = basePtr + index * stride;
+        for (int col = 0; col < 4; ++col) {
+            for (int row = 0; row < 4; ++row) {
+                const int idx = col * 4 + row;
+                mat[col][row] = ReadGltfComponentAsFloat(elem + static_cast<size_t>(idx) * compSize, componentType, normalized);
+            }
+        }
+        return mat;
+    }
 };
 
 GltfAccessorView ResolveGltfAccessor(
@@ -605,6 +628,10 @@ bool ParseGltfOrGlb(const std::filesystem::path& path, bool isGlb, LoadedModelDa
     outData.indices.clear();
     outData.hasMaterial = false;
     outData.primaryMaterial = PBRMaterialData{};
+    outData.hasSkin = false;
+    outData.bindVertices.clear();
+    outData.skinWeights.clear();
+    outData.skeleton = SkeletonData{};
 
     nlohmann::json gltf;
     std::vector<uint8_t> glbBinChunk;
@@ -732,7 +759,178 @@ bool ParseGltfOrGlb(const std::filesystem::path& path, bool isGlb, LoadedModelDa
     }
     const auto& meshes = gltf["meshes"];
 
-    auto appendMeshWithTransform = [&](int meshIndex, const glm::mat4& worldMatrix) {
+    // Parse skeleton nodes, skin, and animations if present
+    if (gltf.contains("nodes") && gltf["nodes"].is_array() && !gltf["nodes"].empty()) {
+        const auto& nodesJson = gltf["nodes"];
+        outData.skeleton.nodes.resize(nodesJson.size());
+        for (size_t i = 0; i < nodesJson.size(); ++i) {
+            const auto& n = nodesJson[i];
+            auto& sn = outData.skeleton.nodes[i];
+            sn.name = n.value("name", "");
+            if (n.contains("matrix") && n["matrix"].is_array() && n["matrix"].size() == 16) {
+                sn.hasBindMatrix = true;
+                sn.bindMatrix = ComputeNodeLocalMatrix(n);
+            } else {
+                if (n.contains("translation") && n["translation"].is_array() && n["translation"].size() == 3) {
+                    sn.bindTranslation = {
+                        n["translation"][0].get<float>(),
+                        n["translation"][1].get<float>(),
+                        n["translation"][2].get<float>()
+                    };
+                }
+                if (n.contains("rotation") && n["rotation"].is_array() && n["rotation"].size() == 4) {
+                    sn.bindRotation = glm::normalize(glm::quat(
+                        n["rotation"][3].get<float>(),
+                        n["rotation"][0].get<float>(),
+                        n["rotation"][1].get<float>(),
+                        n["rotation"][2].get<float>()
+                    ));
+                }
+                if (n.contains("scale") && n["scale"].is_array() && n["scale"].size() == 3) {
+                    sn.bindScale = {
+                        n["scale"][0].get<float>(),
+                        n["scale"][1].get<float>(),
+                        n["scale"][2].get<float>()
+                    };
+                }
+            }
+            if (n.contains("children") && n["children"].is_array()) {
+                for (const auto& c : n["children"]) {
+                    const int cIdx = c.get<int>();
+                    if (cIdx >= 0 && static_cast<size_t>(cIdx) < nodesJson.size()) {
+                        sn.children.push_back(cIdx);
+                    }
+                }
+            }
+        }
+        for (size_t i = 0; i < outData.skeleton.nodes.size(); ++i) {
+            for (int cIdx : outData.skeleton.nodes[i].children) {
+                outData.skeleton.nodes[static_cast<size_t>(cIdx)].parentIndex = static_cast<int>(i);
+            }
+        }
+        if (gltf.contains("scenes") && gltf["scenes"].is_array() && !gltf["scenes"].empty()) {
+            const int defaultScene = std::clamp(
+                gltf.value("scene", 0),
+                0,
+                static_cast<int>(gltf["scenes"].size()) - 1
+            );
+            const auto& sceneJson = gltf["scenes"][static_cast<size_t>(defaultScene)];
+            if (sceneJson.contains("nodes") && sceneJson["nodes"].is_array()) {
+                for (const auto& n : sceneJson["nodes"]) {
+                    const int idx = n.get<int>();
+                    if (idx >= 0 && static_cast<size_t>(idx) < outData.skeleton.nodes.size()) {
+                        outData.skeleton.rootNodes.push_back(idx);
+                    }
+                }
+            }
+        }
+        if (outData.skeleton.rootNodes.empty()) {
+            for (size_t i = 0; i < outData.skeleton.nodes.size(); ++i) {
+                if (outData.skeleton.nodes[i].parentIndex < 0) {
+                    outData.skeleton.rootNodes.push_back(static_cast<int>(i));
+                }
+            }
+        }
+    }
+
+    if (gltf.contains("skins") && gltf["skins"].is_array() && !gltf["skins"].empty()) {
+        const auto& skinJson = gltf["skins"][0];
+        if (skinJson.contains("joints") && skinJson["joints"].is_array()) {
+            for (const auto& j : skinJson["joints"]) {
+                outData.skeleton.jointNodeIndices.push_back(j.get<int>());
+            }
+        }
+        const size_t jointCount = outData.skeleton.jointNodeIndices.size();
+        outData.skeleton.inverseBindMatrices.assign(jointCount, glm::mat4(1.0f));
+        if (skinJson.contains("inverseBindMatrices") && skinJson["inverseBindMatrices"].is_number_integer()) {
+            const GltfAccessorView ibmView = ResolveGltfAccessor(
+                gltf, buffers, skinJson["inverseBindMatrices"].get<int>()
+            );
+            if (ibmView.IsValid()) {
+                const size_t copyCount = std::min(jointCount, ibmView.count);
+                for (size_t j = 0; j < copyCount; ++j) {
+                    outData.skeleton.inverseBindMatrices[j] = ibmView.GetMat4(j);
+                }
+            }
+        }
+        outData.hasSkin = !outData.skeleton.jointNodeIndices.empty() && !outData.skeleton.nodes.empty();
+    }
+
+    if (outData.hasSkin && gltf.contains("animations") && gltf["animations"].is_array()) {
+        const auto& animsJson = gltf["animations"];
+        for (size_t aIdx = 0; aIdx < animsJson.size(); ++aIdx) {
+            const auto& aJson = animsJson[aIdx];
+            if (!aJson.contains("channels") || !aJson["channels"].is_array() ||
+                !aJson.contains("samplers") || !aJson["samplers"].is_array()) {
+                continue;
+            }
+            AnimationClipData clip;
+            clip.name = aJson.value("name", "Animation_" + std::to_string(aIdx));
+            const auto& samplersJson = aJson["samplers"];
+
+            for (const auto& chJson : aJson["channels"]) {
+                if (!chJson.contains("target") || !chJson.contains("sampler")) {
+                    continue;
+                }
+                const auto& target = chJson["target"];
+                if (!target.contains("node") || !target.contains("path")) {
+                    continue;
+                }
+                const int targetNode = target["node"].get<int>();
+                const std::string pathStr = target["path"].get<std::string>();
+                AnimationPathType pathType = AnimationPathType::Translation;
+                if (pathStr == "translation") {
+                    pathType = AnimationPathType::Translation;
+                } else if (pathStr == "rotation") {
+                    pathType = AnimationPathType::Rotation;
+                } else if (pathStr == "scale") {
+                    pathType = AnimationPathType::Scale;
+                } else {
+                    continue;
+                }
+
+                const int samplerIdx = chJson["sampler"].get<int>();
+                if (samplerIdx < 0 || static_cast<size_t>(samplerIdx) >= samplersJson.size()) {
+                    continue;
+                }
+                const auto& sampJson = samplersJson[static_cast<size_t>(samplerIdx)];
+                if (!sampJson.contains("input") || !sampJson.contains("output")) {
+                    continue;
+                }
+                const GltfAccessorView inView = ResolveGltfAccessor(gltf, buffers, sampJson["input"].get<int>());
+                const GltfAccessorView outView = ResolveGltfAccessor(gltf, buffers, sampJson["output"].get<int>());
+                if (!inView.IsValid() || !outView.IsValid()) {
+                    continue;
+                }
+
+                const std::string interpStr = sampJson.value("interpolation", "LINEAR");
+                const bool isCubic = (interpStr == "CUBICSPLINE");
+                AnimationChannelData ch;
+                ch.targetNode = targetNode;
+                ch.path = pathType;
+                ch.interpolation = (interpStr == "STEP") ? AnimationInterpolation::Step : AnimationInterpolation::Linear;
+
+                const size_t keyCount = inView.count;
+                ch.times.resize(keyCount);
+                ch.values.resize(keyCount);
+                for (size_t k = 0; k < keyCount; ++k) {
+                    ch.times[k] = inView.GetScalar(k, 0.0f);
+                    const size_t outIdx = isCubic ? (k * 3 + 1) : k;
+                    ch.values[k] = outView.GetVec4(outIdx, glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+                }
+                if (!ch.times.empty()) {
+                    clip.duration = std::max(clip.duration, ch.times.back());
+                    clip.channels.push_back(std::move(ch));
+                }
+            }
+
+            if (!clip.channels.empty()) {
+                outData.skeleton.animations.push_back(std::move(clip));
+            }
+        }
+    }
+
+    auto appendMeshWithTransform = [&](int meshIndex, const glm::mat4& worldMatrix, bool isSkinnedNode, int nodeIdx) {
         if (meshIndex < 0 || static_cast<size_t>(meshIndex) >= meshes.size()) {
             return;
         }
@@ -773,6 +971,13 @@ bool ParseGltfOrGlb(const std::filesystem::path& path, bool isGlb, LoadedModelDa
             const GltfAccessorView colView = attrs.contains("COLOR_0")
                 ? ResolveGltfAccessor(gltf, buffers, attrs["COLOR_0"].get<int>())
                 : GltfAccessorView{};
+            const GltfAccessorView jointsView = (outData.hasSkin && isSkinnedNode && attrs.contains("JOINTS_0"))
+                ? ResolveGltfAccessor(gltf, buffers, attrs["JOINTS_0"].get<int>())
+                : GltfAccessorView{};
+            const GltfAccessorView weightsView = (outData.hasSkin && isSkinnedNode && attrs.contains("WEIGHTS_0"))
+                ? ResolveGltfAccessor(gltf, buffers, attrs["WEIGHTS_0"].get<int>())
+                : GltfAccessorView{};
+            const bool primSkinned = jointsView.IsValid() && weightsView.IsValid();
 
             PBRMaterialData mat{};
             mat.baseColor = {1.0f, 1.0f, 1.0f, 1.0f};
@@ -787,13 +992,20 @@ bool ParseGltfOrGlb(const std::filesystem::path& path, bool isGlb, LoadedModelDa
             const glm::vec3 matTint = glm::clamp(glm::vec3(mat.baseColor) + mat.emissive, glm::vec3(0.0f), glm::vec3(2.0f));
 
             std::vector<Vertex> primVerts(posView.count);
+            std::vector<Vertex> bindVerts(outData.hasSkin ? posView.count : 0);
+            std::vector<SkinVertexWeight> primWeights(outData.hasSkin ? posView.count : 0);
             for (size_t i = 0; i < posView.count; ++i) {
                 const glm::vec4 p4 = posView.GetVec4(i);
                 const glm::vec3 worldPos = glm::vec3(worldMatrix * glm::vec4(p4.x, p4.y, p4.z, 1.0f));
 
+                glm::vec3 rawN(0.0f, 1.0f, 0.0f);
                 glm::vec3 worldN(0.0f, 1.0f, 0.0f);
                 if (normView.IsValid()) {
                     const glm::vec4 n4 = normView.GetVec4(i, glm::vec4(0.0f, 1.0f, 0.0f, 0.0f));
+                    const float rawLen = glm::length(glm::vec3(n4.x, n4.y, n4.z));
+                    if (rawLen > 1e-6f) {
+                        rawN = glm::vec3(n4.x, n4.y, n4.z) / rawLen;
+                    }
                     const glm::vec3 transformed = normalMat * glm::vec3(n4.x, n4.y, n4.z);
                     const float len = glm::length(transformed);
                     if (len > 1e-6f) {
@@ -814,6 +1026,30 @@ bool ParseGltfOrGlb(const std::filesystem::path& path, bool isGlb, LoadedModelDa
                 }
 
                 primVerts[i] = {worldPos, worldN, vertColor, uv};
+                if (outData.hasSkin) {
+                    if (primSkinned) {
+                        bindVerts[i] = {glm::vec3(p4.x, p4.y, p4.z), rawN, vertColor, uv};
+                        const glm::vec4 j4 = jointsView.GetVec4(i, glm::vec4(0.0f));
+                        glm::vec4 w4 = weightsView.GetVec4(i, glm::vec4(0.0f));
+                        const float wSum = w4.x + w4.y + w4.z + w4.w;
+                        if (wSum > 1e-5f) {
+                            w4 /= wSum;
+                        } else {
+                            w4 = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
+                        }
+                        primWeights[i].joints = {
+                            static_cast<int>(std::lround(j4.x)),
+                            static_cast<int>(std::lround(j4.y)),
+                            static_cast<int>(std::lround(j4.z)),
+                            static_cast<int>(std::lround(j4.w))
+                        };
+                        primWeights[i].weights = w4;
+                    } else {
+                        bindVerts[i] = {glm::vec3(p4.x, p4.y, p4.z), rawN, vertColor, uv};
+                        primWeights[i] = SkinVertexWeight{};
+                        primWeights[i].attachedNode = nodeIdx;
+                    }
+                }
             }
 
             std::vector<uint32_t> rawIndices;
@@ -860,6 +1096,10 @@ bool ParseGltfOrGlb(const std::filesystem::path& path, bool isGlb, LoadedModelDa
             if (normView.IsValid()) {
                 const uint32_t vertexBase = static_cast<uint32_t>(outData.vertices.size());
                 outData.vertices.insert(outData.vertices.end(), primVerts.begin(), primVerts.end());
+                if (outData.hasSkin) {
+                    outData.bindVertices.insert(outData.bindVertices.end(), bindVerts.begin(), bindVerts.end());
+                    outData.skinWeights.insert(outData.skinWeights.end(), primWeights.begin(), primWeights.end());
+                }
                 for (uint32_t idx : triIndices) {
                     if (idx < primVerts.size()) {
                         outData.indices.push_back(vertexBase + idx);
@@ -886,6 +1126,22 @@ bool ParseGltfOrGlb(const std::filesystem::path& path, bool isGlb, LoadedModelDa
                     outData.vertices.push_back(v0);
                     outData.vertices.push_back(v1);
                     outData.vertices.push_back(v2);
+                    if (outData.hasSkin) {
+                        Vertex bv0 = bindVerts[i0];
+                        Vertex bv1 = bindVerts[i1];
+                        Vertex bv2 = bindVerts[i2];
+                        const glm::vec3 bCross = glm::cross(bv1.position - bv0.position, bv2.position - bv0.position);
+                        const glm::vec3 bFlat = glm::length(bCross) > 1e-5f
+                            ? glm::normalize(bCross)
+                            : glm::vec3(0.0f, 1.0f, 0.0f);
+                        bv0.normal = bv1.normal = bv2.normal = bFlat;
+                        outData.bindVertices.push_back(bv0);
+                        outData.bindVertices.push_back(bv1);
+                        outData.bindVertices.push_back(bv2);
+                        outData.skinWeights.push_back(primWeights[i0]);
+                        outData.skinWeights.push_back(primWeights[i1]);
+                        outData.skinWeights.push_back(primWeights[i2]);
+                    }
                     outData.indices.push_back(base);
                     outData.indices.push_back(base + 1);
                     outData.indices.push_back(base + 2);
@@ -938,7 +1194,8 @@ bool ParseGltfOrGlb(const std::filesystem::path& path, bool isGlb, LoadedModelDa
             const auto& node = nodes[static_cast<size_t>(nodeIdx)];
             const glm::mat4 worldTransform = parentTransform * ComputeNodeLocalMatrix(node);
             if (node.contains("mesh") && node["mesh"].is_number_integer()) {
-                appendMeshWithTransform(node["mesh"].get<int>(), worldTransform);
+                const bool nodeHasSkin = node.contains("skin") && node["skin"].is_number_integer();
+                appendMeshWithTransform(node["mesh"].get<int>(), worldTransform, nodeHasSkin, nodeIdx);
             }
             if (node.contains("children") && node["children"].is_array()) {
                 for (const auto& childIdx : node["children"]) {
@@ -952,7 +1209,7 @@ bool ParseGltfOrGlb(const std::filesystem::path& path, bool isGlb, LoadedModelDa
         }
     } else {
         for (size_t m = 0; m < meshes.size(); ++m) {
-            appendMeshWithTransform(static_cast<int>(m), glm::mat4(1.0f));
+            appendMeshWithTransform(static_cast<int>(m), glm::mat4(1.0f), false, -1);
         }
     }
 
@@ -1215,6 +1472,207 @@ bool ModelLoader::LoadModel(const std::filesystem::path& path, LoadedModelData& 
         return ParseObjFileWithMaterials(path, outData);
     }
     return false;
+}
+
+void ModelLoader::EvaluateSkinnedVertices(
+    const LoadedModelData& model,
+    const std::string& animationName,
+    float timeSeconds,
+    bool loop,
+    bool autoPlayFirst,
+    std::vector<Vertex>& outVertices,
+    bool* outFinished
+) {
+    if (outFinished) {
+        *outFinished = false;
+    }
+    if (!model.hasSkin || model.bindVertices.empty() || model.skinWeights.size() != model.bindVertices.size()) {
+        outVertices = model.vertices;
+        return;
+    }
+
+    const auto& skel = model.skeleton;
+    const AnimationClipData* clip = nullptr;
+    if (!animationName.empty()) {
+        for (const auto& c : skel.animations) {
+            if (c.name == animationName) {
+                clip = &c;
+                break;
+            }
+        }
+    }
+    if (!clip && autoPlayFirst && !skel.animations.empty()) {
+        clip = &skel.animations.front();
+    }
+    if (!clip || skel.nodes.empty() || skel.jointNodeIndices.empty()) {
+        outVertices = model.vertices;
+        return;
+    }
+
+    float evalTime = timeSeconds;
+    if (clip->duration > 1e-5f) {
+        if (loop) {
+            evalTime = std::fmod(timeSeconds, clip->duration);
+            if (evalTime < 0.0f) {
+                evalTime += clip->duration;
+            }
+        } else {
+            if (timeSeconds >= clip->duration) {
+                evalTime = clip->duration;
+                if (outFinished) {
+                    *outFinished = true;
+                }
+            } else if (timeSeconds < 0.0f) {
+                evalTime = 0.0f;
+            }
+        }
+    } else {
+        evalTime = 0.0f;
+    }
+
+    const size_t nodeCount = skel.nodes.size();
+    std::vector<glm::vec3> localT(nodeCount);
+    std::vector<glm::quat> localR(nodeCount);
+    std::vector<glm::vec3> localS(nodeCount);
+    std::vector<bool> useBindMatrix(nodeCount, false);
+    for (size_t i = 0; i < nodeCount; ++i) {
+        localT[i] = skel.nodes[i].bindTranslation;
+        localR[i] = skel.nodes[i].bindRotation;
+        localS[i] = skel.nodes[i].bindScale;
+        useBindMatrix[i] = skel.nodes[i].hasBindMatrix;
+    }
+
+    for (const auto& ch : clip->channels) {
+        if (ch.targetNode < 0 || static_cast<size_t>(ch.targetNode) >= nodeCount || ch.times.empty() || ch.values.empty()) {
+            continue;
+        }
+        const size_t nIdx = static_cast<size_t>(ch.targetNode);
+        useBindMatrix[nIdx] = false;
+
+        glm::vec4 sampled(0.0f);
+        if (ch.times.size() == 1 || evalTime <= ch.times.front()) {
+            sampled = ch.values.front();
+        } else if (evalTime >= ch.times.back()) {
+            sampled = ch.values.back();
+        } else {
+            auto it = std::upper_bound(ch.times.begin(), ch.times.end(), evalTime);
+            size_t k1 = static_cast<size_t>(std::distance(ch.times.begin(), it));
+            if (k1 == 0) k1 = 1;
+            if (k1 >= ch.times.size()) k1 = ch.times.size() - 1;
+            const size_t k0 = k1 - 1;
+            const float t0 = ch.times[k0];
+            const float t1 = ch.times[k1];
+            const float dt = t1 - t0;
+            const float alpha = (ch.interpolation == AnimationInterpolation::Step || dt <= 1e-6f)
+                ? 0.0f
+                : std::clamp((evalTime - t0) / dt, 0.0f, 1.0f);
+
+            if (ch.path == AnimationPathType::Rotation) {
+                // glTF rotation values are stored as [x, y, z, w]
+                const glm::vec4& a = ch.values[k0];
+                const glm::vec4& b = ch.values[k1];
+                glm::quat q0 = glm::normalize(glm::quat(a.w, a.x, a.y, a.z));
+                glm::quat q1 = glm::normalize(glm::quat(b.w, b.x, b.y, b.z));
+                if (glm::dot(q0, q1) < 0.0f) {
+                    q1 = -q1;
+                }
+                const glm::quat q = glm::normalize(glm::slerp(q0, q1, alpha));
+                sampled = glm::vec4(q.x, q.y, q.z, q.w);
+            } else {
+                sampled = glm::mix(ch.values[k0], ch.values[k1], alpha);
+            }
+        }
+
+        switch (ch.path) {
+            case AnimationPathType::Translation:
+                localT[nIdx] = glm::vec3(sampled.x, sampled.y, sampled.z);
+                break;
+            case AnimationPathType::Rotation:
+                localR[nIdx] = glm::normalize(glm::quat(sampled.w, sampled.x, sampled.y, sampled.z));
+                break;
+            case AnimationPathType::Scale:
+                localS[nIdx] = glm::vec3(sampled.x, sampled.y, sampled.z);
+                break;
+        }
+    }
+
+    std::vector<glm::mat4> globalTransforms(nodeCount, glm::mat4(1.0f));
+    std::vector<bool> visited(nodeCount, false);
+    auto computeGlobal = [&](auto& self, int nodeIdx, const glm::mat4& parentGlobal) -> void {
+        if (nodeIdx < 0 || static_cast<size_t>(nodeIdx) >= nodeCount) {
+            return;
+        }
+        const size_t idx = static_cast<size_t>(nodeIdx);
+        if (visited[idx]) {
+            return;
+        }
+        visited[idx] = true;
+        const glm::mat4 localMat = useBindMatrix[idx]
+            ? skel.nodes[idx].bindMatrix
+            : (glm::translate(glm::mat4(1.0f), localT[idx]) *
+               glm::mat4_cast(localR[idx]) *
+               glm::scale(glm::mat4(1.0f), localS[idx]));
+        globalTransforms[idx] = parentGlobal * localMat;
+        for (int childIdx : skel.nodes[idx].children) {
+            self(self, childIdx, globalTransforms[idx]);
+        }
+    };
+
+    for (int rootIdx : skel.rootNodes) {
+        computeGlobal(computeGlobal, rootIdx, glm::mat4(1.0f));
+    }
+    for (size_t i = 0; i < nodeCount; ++i) {
+        if (!visited[i]) {
+            computeGlobal(computeGlobal, static_cast<int>(i), glm::mat4(1.0f));
+        }
+    }
+
+    const size_t jointCount = skel.jointNodeIndices.size();
+    std::vector<glm::mat4> jointMatrices(jointCount, glm::mat4(1.0f));
+    for (size_t j = 0; j < jointCount; ++j) {
+        const int jNode = skel.jointNodeIndices[j];
+        if (jNode >= 0 && static_cast<size_t>(jNode) < nodeCount) {
+            jointMatrices[j] = globalTransforms[static_cast<size_t>(jNode)] * skel.inverseBindMatrices[j];
+        }
+    }
+
+    const size_t vertCount = model.bindVertices.size();
+    outVertices.resize(vertCount);
+    for (size_t i = 0; i < vertCount; ++i) {
+        const Vertex& src = model.bindVertices[i];
+        const SkinVertexWeight& sw = model.skinWeights[i];
+        const float wSum = sw.weights.x + sw.weights.y + sw.weights.z + sw.weights.w;
+        if (sw.joints.x < 0 || wSum <= 1e-5f) {
+            if (sw.attachedNode >= 0 && static_cast<size_t>(sw.attachedNode) < nodeCount) {
+                const glm::mat4& nodeMat = globalTransforms[static_cast<size_t>(sw.attachedNode)];
+                Vertex dst = src;
+                dst.position = glm::vec3(nodeMat * glm::vec4(src.position, 1.0f));
+                const glm::vec3 n = glm::mat3(nodeMat) * src.normal;
+                const float nLen = glm::length(n);
+                dst.normal = (nLen > 1e-6f) ? (n / nLen) : glm::vec3(0.0f, 1.0f, 0.0f);
+                outVertices[i] = dst;
+            } else {
+                outVertices[i] = src;
+            }
+            continue;
+        }
+
+        glm::mat4 skinMat(0.0f);
+        for (int k = 0; k < 4; ++k) {
+            const float w = sw.weights[k];
+            const int j = sw.joints[k];
+            if (w > 0.0f && j >= 0 && static_cast<size_t>(j) < jointCount) {
+                skinMat += jointMatrices[static_cast<size_t>(j)] * w;
+            }
+        }
+
+        Vertex dst = src;
+        dst.position = glm::vec3(skinMat * glm::vec4(src.position, 1.0f));
+        const glm::vec3 n = glm::mat3(skinMat) * src.normal;
+        const float nLen = glm::length(n);
+        dst.normal = (nLen > 1e-6f) ? (n / nLen) : glm::vec3(0.0f, 1.0f, 0.0f);
+        outVertices[i] = dst;
+    }
 }
 
 bool ModelLoader::LoadMaterialFile(const std::filesystem::path& path, PBRMaterialData& outMat) {

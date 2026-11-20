@@ -21,6 +21,7 @@ public:
     entt::entity FindEntityByName(std::string_view name) const;
     glm::mat4 GetWorldTransform(entt::entity entity) const;
     bool ComputePrimaryCameraViewProjection(float aspect, glm::mat4& outViewProj) const;
+    void UpdateAnimations(float deltaSeconds);
 
     bool IsValid(entt::entity entity) const {
         return entity != entt::null && m_Registry.valid(entity);

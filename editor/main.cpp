@@ -66,6 +66,7 @@ protected:
             Kyumist::InputMap::Update(nativeWindow);
             Kyumist::ScriptEngine::OnRuntimeUpdate(&m_Scene, ts);
             Kyumist::PhysicsSystem::Step(&m_Scene, ts);
+            m_Scene.UpdateAnimations(ts.GetSeconds());
 
             if (Kyumist::ScriptEngine::HasPendingSceneLoad()) {
                 const std::string relScene = Kyumist::ScriptEngine::ConsumePendingSceneLoad();

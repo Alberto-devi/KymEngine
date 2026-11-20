@@ -97,6 +97,26 @@ public final class Entity {
         NativeBridge.applyImpulse(id, ix, iy, iz);
     }
 
+    public void playAnimation(String animationName) {
+        NativeBridge.playAnimation(id, animationName, true);
+    }
+
+    public void playAnimation(String animationName, boolean loop) {
+        NativeBridge.playAnimation(id, animationName, loop);
+    }
+
+    public void stopAnimation() {
+        NativeBridge.stopAnimation(id);
+    }
+
+    public void setAnimationSpeed(float speed) {
+        NativeBridge.setAnimationSpeed(id, speed);
+    }
+
+    public boolean isAnimationPlaying() {
+        return NativeBridge.isAnimationPlaying(id);
+    }
+
     public void destroy() {
         NativeBridge.destroyEntity(id);
     }

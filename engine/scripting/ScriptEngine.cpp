@@ -492,12 +492,19 @@ jlong JNICALL Native_SpawnPrefab(JNIEnv* env, jclass /*cls*/, jstring jPath, jfl
     }
     const jlong eid = static_cast<jlong>(entt::to_integral(spawned));
     if (reg.all_of<JavaScriptComponent>(spawned) && s_State.env && s_State.scriptHostClass && s_State.createInstanceMethod) {
-        const auto& js = reg.get<JavaScriptComponent>(spawned);
+        auto& js = reg.get<JavaScriptComponent>(spawned);
         if (js.enabled && !js.className.empty()) {
             jstring jClass = s_State.env->NewStringUTF(js.className.c_str());
-            s_State.env->CallStaticBooleanMethod(s_State.scriptHostClass, s_State.createInstanceMethod, eid, jClass);
+            const jboolean ok = s_State.env->CallStaticBooleanMethod(
+                s_State.scriptHostClass,
+                s_State.createInstanceMethod,
+                eid,
+                jClass
+            );
             s_State.env->DeleteLocalRef(jClass);
-            CheckAndClearException(s_State.env, "ScriptHost.createInstance(spawnPrefab)");
+            if (!CheckAndClearException(s_State.env, "ScriptHost.createInstance(spawnPrefab)") && ok == JNI_TRUE) {
+                js.instanceCreated = true;
+            }
         }
     }
     return eid;
@@ -552,6 +559,63 @@ jboolean JNICALL Native_UISetClass(JNIEnv* env, jclass /*cls*/, jstring jId, jst
     return UISystem::SetClass(JStringToStdString(env, jId), JStringToStdString(env, jCls), active == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
 }
 
+void JNICALL Native_PlayAnimation(JNIEnv* env, jclass /*cls*/, jlong entityId, jstring jAnimName, jboolean loop) {
+    if (!s_State.activeScene) {
+        return;
+    }
+    const entt::entity entity = ToEntity(entityId);
+    if (!s_State.activeScene->IsValid(entity)) {
+        return;
+    }
+    const std::string animName = JStringToStdString(env, jAnimName);
+    auto& anim = s_State.activeScene->GetRegistry().get_or_emplace<AnimatorComponent>(entity);
+    if (anim.currentAnimation != animName || !anim.playing) {
+        anim.time = 0.0f;
+    }
+    anim.currentAnimation = animName;
+    anim.loop = (loop == JNI_TRUE);
+    anim.playing = true;
+}
+
+void JNICALL Native_StopAnimation(JNIEnv* /*env*/, jclass /*cls*/, jlong entityId) {
+    if (!s_State.activeScene) {
+        return;
+    }
+    const entt::entity entity = ToEntity(entityId);
+    if (!s_State.activeScene->IsValid(entity)) {
+        return;
+    }
+    if (auto* anim = s_State.activeScene->GetRegistry().try_get<AnimatorComponent>(entity)) {
+        anim->playing = false;
+    }
+}
+
+void JNICALL Native_SetAnimationSpeed(JNIEnv* /*env*/, jclass /*cls*/, jlong entityId, jfloat speed) {
+    if (!s_State.activeScene) {
+        return;
+    }
+    const entt::entity entity = ToEntity(entityId);
+    if (!s_State.activeScene->IsValid(entity)) {
+        return;
+    }
+    auto& anim = s_State.activeScene->GetRegistry().get_or_emplace<AnimatorComponent>(entity);
+    anim.speed = speed;
+}
+
+jboolean JNICALL Native_IsAnimationPlaying(JNIEnv* /*env*/, jclass /*cls*/, jlong entityId) {
+    if (!s_State.activeScene) {
+        return JNI_FALSE;
+    }
+    const entt::entity entity = ToEntity(entityId);
+    if (!s_State.activeScene->IsValid(entity)) {
+        return JNI_FALSE;
+    }
+    if (const auto* anim = s_State.activeScene->GetRegistry().try_get<AnimatorComponent>(entity)) {
+        return anim->playing ? JNI_TRUE : JNI_FALSE;
+    }
+    return JNI_FALSE;
+}
+
 bool RegisterNativeBridge(JNIEnv* env) {
     jclass bridgeClass = env->FindClass("dev/kyumist/NativeBridge");
     if (!bridgeClass || CheckAndClearException(env, "FindClass(NativeBridge)")) {
@@ -562,7 +626,7 @@ bool RegisterNativeBridge(JNIEnv* env) {
         return JNINativeMethod{const_cast<char*>(name), const_cast<char*>(sig), fn};
     };
 
-    const std::array<JNINativeMethod, 40> methods{{
+    const std::array<JNINativeMethod, 44> methods{{
         makeMethod("logInfo",              "(Ljava/lang/String;)V",       reinterpret_cast<void*>(Native_LogInfo)),
         makeMethod("logWarn",              "(Ljava/lang/String;)V",       reinterpret_cast<void*>(Native_LogWarn)),
         makeMethod("logError",             "(Ljava/lang/String;)V",       reinterpret_cast<void*>(Native_LogError)),
@@ -602,7 +666,11 @@ bool RegisterNativeBridge(JNIEnv* env) {
         makeMethod("setAngularVelocity",   "(JFFF)V",                     reinterpret_cast<void*>(Native_SetAngularVelocity)),
         makeMethod("applyImpulse",         "(JFFF)V",                     reinterpret_cast<void*>(Native_ApplyImpulse)),
         makeMethod("raycast",              "(FFFFFFF)J",                  reinterpret_cast<void*>(Native_Raycast)),
-        makeMethod("playSound",            "(Ljava/lang/String;F)V",      reinterpret_cast<void*>(Native_PlaySound))
+        makeMethod("playSound",            "(Ljava/lang/String;F)V",      reinterpret_cast<void*>(Native_PlaySound)),
+        makeMethod("playAnimation",        "(JLjava/lang/String;Z)V",     reinterpret_cast<void*>(Native_PlayAnimation)),
+        makeMethod("stopAnimation",        "(J)V",                        reinterpret_cast<void*>(Native_StopAnimation)),
+        makeMethod("setAnimationSpeed",    "(JF)V",                       reinterpret_cast<void*>(Native_SetAnimationSpeed)),
+        makeMethod("isAnimationPlaying",   "(J)Z",                        reinterpret_cast<void*>(Native_IsAnimationPlaying))
     }};
 
     const jint res = env->RegisterNatives(bridgeClass, methods.data(), static_cast<jint>(methods.size()));

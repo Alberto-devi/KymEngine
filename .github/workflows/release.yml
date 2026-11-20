@@ -176,7 +176,8 @@ jobs:
       - name: Build Android Template APK
         working-directory: packaging/android
         run: |
-          gradle assembleRelease
+          rm -rf .gradle
+          gradle assembleRelease --no-daemon --stacktrace
           cp app/build/outputs/apk/release/app-release-unsigned.apk ../../KymEngine-android-template.apk
 
       - name: Upload Android template artifact

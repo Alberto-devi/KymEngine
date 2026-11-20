@@ -16,8 +16,30 @@
 
 namespace Kyumist::PlatformPaths {
 
+#ifdef __ANDROID__
+namespace detail {
+inline std::filesystem::path& AndroidDataDirStorage() {
+    static std::filesystem::path s_AndroidDataDir;
+    return s_AndroidDataDir;
+}
+} // namespace detail
+
+inline void SetAndroidDataDir(const std::filesystem::path& dir) {
+    detail::AndroidDataDirStorage() = dir;
+}
+
+inline const std::filesystem::path& GetAndroidDataDir() {
+    return detail::AndroidDataDirStorage();
+}
+#endif
+
 inline std::filesystem::path GetExecutableDir() {
     std::error_code ec;
+#ifdef __ANDROID__
+    if (!GetAndroidDataDir().empty()) {
+        return GetAndroidDataDir();
+    }
+#endif
 #ifdef _WIN32
     char buf[4096]{};
     const DWORD len = ::GetModuleFileNameA(nullptr, buf, static_cast<DWORD>(sizeof(buf) - 1));
@@ -38,6 +60,11 @@ inline std::filesystem::path GetExecutableDir() {
 
 inline std::filesystem::path GetUserDataDir() {
     std::error_code ec;
+#ifdef __ANDROID__
+    if (!GetAndroidDataDir().empty()) {
+        return GetAndroidDataDir();
+    }
+#endif
 #ifdef _WIN32
     if (const char* localAppData = std::getenv("LOCALAPPDATA")) {
         if (*localAppData != '\0') {
@@ -81,6 +108,11 @@ inline bool IsDirectoryWritable(const std::filesystem::path& dir) {
 
 inline std::filesystem::path ResolveAssetsDir() {
     std::error_code ec;
+#ifdef __ANDROID__
+    if (!GetAndroidDataDir().empty() && std::filesystem::exists(GetAndroidDataDir(), ec)) {
+        return GetAndroidDataDir();
+    }
+#endif
     const std::filesystem::path exeDir = GetExecutableDir();
     const std::filesystem::path candidates[] = {
         exeDir / "assets",
@@ -106,6 +138,18 @@ inline std::filesystem::path ResolveAssetsDir() {
 
 inline std::filesystem::path ResolveShadersDir() {
     std::error_code ec;
+#ifdef __ANDROID__
+    if (!GetAndroidDataDir().empty()) {
+        const std::filesystem::path p1 = GetAndroidDataDir() / "shaders";
+        if (std::filesystem::exists(p1, ec) && std::filesystem::is_directory(p1, ec)) {
+            return p1;
+        }
+        const std::filesystem::path p2 = GetAndroidDataDir() / "assets" / "shaders";
+        if (std::filesystem::exists(p2, ec) && std::filesystem::is_directory(p2, ec)) {
+            return p2;
+        }
+    }
+#endif
     const std::filesystem::path exeDir = GetExecutableDir();
     const std::filesystem::path candidates[] = {
         exeDir / "assets" / "shaders",

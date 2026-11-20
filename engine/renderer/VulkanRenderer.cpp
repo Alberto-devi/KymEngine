@@ -1,3 +1,7 @@
+#ifdef __ANDROID__
+#define VMA_STATIC_VULKAN_FUNCTIONS 0
+#define VMA_DYNAMIC_VULKAN_FUNCTIONS 1
+#endif
 #define VMA_IMPLEMENTATION
 #include "renderer/VulkanRenderer.hpp"
 
@@ -13,11 +17,13 @@
 #include <imgui.h>
 #ifndef __ANDROID__
 #include <imgui_impl_glfw.h>
+#include <ImGuizmo.h>
 #else
+#include <imgui_impl_android.h>
 #include <vulkan/vulkan_android.h>
+#include <android/native_window.h>
 #endif
 #include <imgui_impl_vulkan.h>
-#include <ImGuizmo.h>
 
 #include <algorithm>
 #include <array>
@@ -296,6 +302,9 @@ VulkanRenderer::VulkanRenderer(Window* window, bool headless)
 
     InitVulkan();
 
+#ifdef __ANDROID__
+    CreateSceneRenderPass();
+#endif
     if (m_Headless) {
         CreateHeadlessTarget();
     } else {
@@ -399,6 +408,17 @@ VulkanRenderer::~VulkanRenderer() {
         DestroySwapchain();
     }
 
+#ifdef __ANDROID__
+    if (m_SceneRenderPass != VK_NULL_HANDLE) {
+        vkDestroyRenderPass(m_Device, m_SceneRenderPass, nullptr);
+        m_SceneRenderPass = VK_NULL_HANDLE;
+    }
+    if (m_ImGuiRenderPass != VK_NULL_HANDLE) {
+        vkDestroyRenderPass(m_Device, m_ImGuiRenderPass, nullptr);
+        m_ImGuiRenderPass = VK_NULL_HANDLE;
+    }
+#endif
+
     if (m_Allocator != VK_NULL_HANDLE) {
         vmaDestroyAllocator(m_Allocator);
     }
@@ -418,11 +438,18 @@ VulkanRenderer::~VulkanRenderer() {
 
 void VulkanRenderer::InitVulkan() {
     vkb::InstanceBuilder instanceBuilder;
+#ifdef __ANDROID__
+    instanceBuilder.set_app_name("Kyumist Engine")
+        .request_validation_layers(false)
+        .require_api_version(1, 1, 0)
+        .set_headless(m_Headless);
+#else
     instanceBuilder.set_app_name("Kyumist Engine")
         .request_validation_layers(true)
         .require_api_version(1, 3, 0)
         .set_debug_callback(VulkanDebugCallback)
         .set_headless(m_Headless);
+#endif
 
     auto instanceRet = instanceBuilder.build();
     if (!instanceRet) {
@@ -451,14 +478,18 @@ void VulkanRenderer::InitVulkan() {
 #endif
     }
 
+    vkb::PhysicalDeviceSelector selector{vkbInstance};
+#ifdef __ANDROID__
+    selector.set_minimum_version(1, 1);
+#else
     VkPhysicalDeviceVulkan13Features features13{};
     features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
     features13.dynamicRendering = VK_TRUE;
     features13.synchronization2 = VK_TRUE;
 
-    vkb::PhysicalDeviceSelector selector{vkbInstance};
     selector.set_minimum_version(1, 3)
         .set_required_features_13(features13);
+#endif
 
     if (m_Headless) {
         selector.require_present(false);
@@ -468,14 +499,27 @@ void VulkanRenderer::InitVulkan() {
 
     auto physRet = selector.select();
     if (!physRet) {
-        KM_CORE_CRITICAL("Failed to select Vulkan 1.3 physical device: {}", physRet.error().message());
-        throw std::runtime_error("Failed to select Vulkan 1.3 physical device");
+        KM_CORE_CRITICAL("Failed to select Vulkan physical device: {}", physRet.error().message());
+        throw std::runtime_error("Failed to select Vulkan physical device");
     }
 
     vkb::PhysicalDevice vkbPhysicalDevice = physRet.value();
     m_PhysicalDevice = vkbPhysicalDevice.physical_device;
     m_DeviceName = vkbPhysicalDevice.name;
     KM_CORE_INFO("Selected GPU: {}", m_DeviceName);
+
+#ifdef __ANDROID__
+    m_SceneFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    m_SceneDepthFormat = VK_FORMAT_D16_UNORM;
+    for (VkFormat cand : {VK_FORMAT_D32_SFLOAT, VK_FORMAT_D24_UNORM_S8_UINT, VK_FORMAT_D16_UNORM}) {
+        VkFormatProperties props{};
+        vkGetPhysicalDeviceFormatProperties(m_PhysicalDevice, cand, &props);
+        if ((props.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) != 0) {
+            m_SceneDepthFormat = cand;
+            break;
+        }
+    }
+#endif
 
     vkb::DeviceBuilder deviceBuilder{vkbPhysicalDevice};
     auto devRet = deviceBuilder.build();
@@ -504,7 +548,15 @@ void VulkanRenderer::InitVulkan() {
     }
 
     VmaAllocatorCreateInfo allocatorInfo{};
+#ifdef __ANDROID__
+    VmaVulkanFunctions vmaFuncs{};
+    vmaFuncs.vkGetInstanceProcAddr = &vkGetInstanceProcAddr;
+    vmaFuncs.vkGetDeviceProcAddr = &vkGetDeviceProcAddr;
+    allocatorInfo.pVulkanFunctions = &vmaFuncs;
+    allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_1;
+#else
     allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_3;
+#endif
     allocatorInfo.physicalDevice = m_PhysicalDevice;
     allocatorInfo.device = m_Device;
     allocatorInfo.instance = m_Instance;
@@ -524,10 +576,38 @@ void VulkanRenderer::CreateSwapchain() {
     VkSwapchainKHR oldSwapchain = m_Swapchain;
 
     vkb::SwapchainBuilder swapchainBuilder{m_PhysicalDevice, m_Device, m_Surface};
+#ifdef __ANDROID__
+    VkSurfaceCapabilitiesKHR surfCaps{};
+    CheckVkResult(
+        vkGetPhysicalDeviceSurfaceCapabilitiesKHR(m_PhysicalDevice, m_Surface, &surfCaps),
+        "vkGetPhysicalDeviceSurfaceCapabilitiesKHR"
+    );
+    VkCompositeAlphaFlagBitsKHR chosenAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    for (VkCompositeAlphaFlagBitsKHR cand : {
+             VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+             VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR,
+             VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR,
+             VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR}) {
+        if ((surfCaps.supportedCompositeAlpha & cand) != 0) {
+            chosenAlpha = cand;
+            break;
+        }
+    }
+    swapchainBuilder
+        .set_desired_format({VK_FORMAT_R8G8B8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR})
+        .add_fallback_format({VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR})
+        .set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
+        .set_composite_alpha_flags(chosenAlpha)
+        .set_desired_extent(width, height);
+    if ((surfCaps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) != 0) {
+        swapchainBuilder.set_pre_transform_flags(VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR);
+    }
+#else
     swapchainBuilder
         .set_desired_format({VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR})
         .set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
         .set_desired_extent(width, height);
+#endif
 
     if (oldSwapchain != VK_NULL_HANDLE) {
         swapchainBuilder.set_old_swapchain(oldSwapchain);
@@ -550,6 +630,13 @@ void VulkanRenderer::CreateSwapchain() {
     m_SwapchainImages = vkbSwapchain.get_images().value();
     m_SwapchainImageViews = vkbSwapchain.get_image_views().value();
 
+#ifdef __ANDROID__
+    if (m_ImGuiRenderPass == VK_NULL_HANDLE) {
+        CreateImGuiRenderPass();
+    }
+    CreateSwapchainFramebuffers();
+#endif
+
     VkSemaphoreCreateInfo semaphoreInfo{};
     semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
@@ -563,6 +650,9 @@ void VulkanRenderer::CreateSwapchain() {
 }
 
 void VulkanRenderer::DestroySwapchain() {
+#ifdef __ANDROID__
+    DestroySwapchainFramebuffers();
+#endif
     for (VkSemaphore semaphore : m_RenderFinishedSemaphores) {
         if (semaphore != VK_NULL_HANDLE) {
             vkDestroySemaphore(m_Device, semaphore, nullptr);
@@ -585,11 +675,21 @@ void VulkanRenderer::DestroySwapchain() {
 }
 
 void VulkanRenderer::RecreateSwapchain() {
+#ifdef __ANDROID__
+    if (m_SurfaceSuspended || m_Surface == VK_NULL_HANDLE) {
+        return;
+    }
+#endif
     int width = static_cast<int>(m_Window->GetWidth());
     int height = static_cast<int>(m_Window->GetHeight());
     while (width == 0 || height == 0) {
 #ifndef __ANDROID__
         glfwWaitEvents();
+#else
+        m_Window->PollEvents();
+        if (m_SurfaceSuspended) {
+            return;
+        }
 #endif
         if (m_Window->ShouldClose()) {
             return;
@@ -600,6 +700,9 @@ void VulkanRenderer::RecreateSwapchain() {
 
     vkDeviceWaitIdle(m_Device);
 
+#ifdef __ANDROID__
+    DestroySwapchainFramebuffers();
+#endif
     for (VkSemaphore semaphore : m_RenderFinishedSemaphores) {
         if (semaphore != VK_NULL_HANDLE) {
             vkDestroySemaphore(m_Device, semaphore, nullptr);
@@ -671,6 +774,213 @@ void VulkanRenderer::DestroyHeadlessTarget() {
     }
 }
 
+#ifdef __ANDROID__
+void VulkanRenderer::CreateSceneRenderPass() {
+    if (m_SceneRenderPass != VK_NULL_HANDLE) {
+        return;
+    }
+
+    VkAttachmentDescription colorAttachment{};
+    colorAttachment.format = m_SceneFormat;
+    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkAttachmentDescription depthAttachment{};
+    depthAttachment.format = m_SceneDepthFormat;
+    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentReference colorRef{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+    VkAttachmentReference depthRef{1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &colorRef;
+    subpass.pDepthStencilAttachment = &depthRef;
+
+    std::array<VkSubpassDependency, 2> dependencies{};
+    dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependencies[0].dstSubpass = 0;
+    dependencies[0].srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+    dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    dependencies[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    dependencies[0].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+    dependencies[1].srcSubpass = 0;
+    dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+    dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependencies[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    dependencies[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    dependencies[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    dependencies[1].dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT;
+
+    std::array<VkAttachmentDescription, 2> attachments{colorAttachment, depthAttachment};
+    VkRenderPassCreateInfo rpInfo{};
+    rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    rpInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
+    rpInfo.pAttachments = attachments.data();
+    rpInfo.subpassCount = 1;
+    rpInfo.pSubpasses = &subpass;
+    rpInfo.dependencyCount = static_cast<uint32_t>(dependencies.size());
+    rpInfo.pDependencies = dependencies.data();
+
+    CheckVkResult(vkCreateRenderPass(m_Device, &rpInfo, nullptr, &m_SceneRenderPass), "vkCreateRenderPass (scene)");
+}
+
+void VulkanRenderer::CreateImGuiRenderPass() {
+    if (m_ImGuiRenderPass != VK_NULL_HANDLE) {
+        return;
+    }
+
+    VkAttachmentDescription colorAttachment{};
+    colorAttachment.format = m_ColorFormat;
+    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    VkAttachmentReference colorRef{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+
+    VkSubpassDescription subpass{};
+    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments = &colorRef;
+
+    VkSubpassDependency dependency{};
+    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependency.dstSubpass = 0;
+    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.srcAccessMask = 0;
+    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+    VkRenderPassCreateInfo rpInfo{};
+    rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    rpInfo.attachmentCount = 1;
+    rpInfo.pAttachments = &colorAttachment;
+    rpInfo.subpassCount = 1;
+    rpInfo.pSubpasses = &subpass;
+    rpInfo.dependencyCount = 1;
+    rpInfo.pDependencies = &dependency;
+
+    CheckVkResult(vkCreateRenderPass(m_Device, &rpInfo, nullptr, &m_ImGuiRenderPass), "vkCreateRenderPass (ImGui)");
+}
+
+void VulkanRenderer::CreateSceneFramebuffer() {
+    DestroySceneFramebuffer();
+    std::array<VkImageView, 2> attachments{m_SceneImageView, m_SceneDepthImageView};
+    VkFramebufferCreateInfo fbInfo{};
+    fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+    fbInfo.renderPass = m_SceneRenderPass;
+    fbInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
+    fbInfo.pAttachments = attachments.data();
+    fbInfo.width = m_SceneExtent.width;
+    fbInfo.height = m_SceneExtent.height;
+    fbInfo.layers = 1;
+    CheckVkResult(vkCreateFramebuffer(m_Device, &fbInfo, nullptr, &m_SceneFramebuffer), "vkCreateFramebuffer (scene)");
+}
+
+void VulkanRenderer::DestroySceneFramebuffer() {
+    if (m_SceneFramebuffer != VK_NULL_HANDLE) {
+        vkDestroyFramebuffer(m_Device, m_SceneFramebuffer, nullptr);
+        m_SceneFramebuffer = VK_NULL_HANDLE;
+    }
+}
+
+void VulkanRenderer::CreateSwapchainFramebuffers() {
+    DestroySwapchainFramebuffers();
+    m_SwapchainFramebuffers.resize(m_SwapchainImageViews.size(), VK_NULL_HANDLE);
+    for (size_t i = 0; i < m_SwapchainImageViews.size(); ++i) {
+        VkFramebufferCreateInfo fbInfo{};
+        fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        fbInfo.renderPass = m_ImGuiRenderPass;
+        fbInfo.attachmentCount = 1;
+        fbInfo.pAttachments = &m_SwapchainImageViews[i];
+        fbInfo.width = m_Extent.width;
+        fbInfo.height = m_Extent.height;
+        fbInfo.layers = 1;
+        CheckVkResult(
+            vkCreateFramebuffer(m_Device, &fbInfo, nullptr, &m_SwapchainFramebuffers[i]),
+            "vkCreateFramebuffer (swapchain)"
+        );
+    }
+}
+
+void VulkanRenderer::DestroySwapchainFramebuffers() {
+    for (VkFramebuffer fb : m_SwapchainFramebuffers) {
+        if (fb != VK_NULL_HANDLE) {
+            vkDestroyFramebuffer(m_Device, fb, nullptr);
+        }
+    }
+    m_SwapchainFramebuffers.clear();
+}
+
+void VulkanRenderer::SuspendSurface() {
+    if (m_SurfaceSuspended) {
+        return;
+    }
+    m_SurfaceSuspended = true;
+    if (m_Device != VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(m_Device);
+    }
+    DestroySwapchain();
+    if (m_Surface != VK_NULL_HANDLE && m_Instance != VK_NULL_HANDLE) {
+        vkDestroySurfaceKHR(m_Instance, m_Surface, nullptr);
+        m_Surface = VK_NULL_HANDLE;
+    }
+    if (m_Window) {
+        m_Window->UpdateAndroidWindow(nullptr);
+    }
+    KM_CORE_INFO("Android Vulkan surface suspended.");
+}
+
+void VulkanRenderer::ResumeSurface(ANativeWindow* newWindow) {
+    if (!newWindow || m_Instance == VK_NULL_HANDLE || m_Device == VK_NULL_HANDLE) {
+        return;
+    }
+    if (m_Device != VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(m_Device);
+    }
+    DestroySwapchain();
+    if (m_Surface != VK_NULL_HANDLE && m_Instance != VK_NULL_HANDLE) {
+        vkDestroySurfaceKHR(m_Instance, m_Surface, nullptr);
+        m_Surface = VK_NULL_HANDLE;
+    }
+    if (m_Window) {
+        m_Window->UpdateAndroidWindow(newWindow);
+    }
+    VkAndroidSurfaceCreateInfoKHR surfInfo{};
+    surfInfo.sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR;
+    surfInfo.window = newWindow;
+    CheckVkResult(
+        vkCreateAndroidSurfaceKHR(m_Instance, &surfInfo, nullptr, &m_Surface),
+        "vkCreateAndroidSurfaceKHR (resume)"
+    );
+    CreateSwapchain();
+    if (m_ImGuiInitialized) {
+        ImGui_ImplAndroid_Shutdown();
+        ImGui_ImplAndroid_Init(newWindow);
+    }
+    m_SurfaceSuspended = false;
+    KM_CORE_INFO("Android Vulkan surface resumed ({}x{}).", m_Extent.width, m_Extent.height);
+}
+#endif
+
 void VulkanRenderer::CreateSceneTarget(uint32_t width, uint32_t height) {
     m_SceneExtent = {std::max(width, 1u), std::max(height, 1u)};
     m_RequestedSceneExtent = m_SceneExtent;
@@ -738,6 +1048,10 @@ void VulkanRenderer::CreateSceneTarget(uint32_t width, uint32_t height) {
         "vkCreateImageView (scene depth target)"
     );
 
+#ifdef __ANDROID__
+    CreateSceneFramebuffer();
+#endif
+
     if (m_SceneSampler == VK_NULL_HANDLE) {
         VkSamplerCreateInfo samplerInfo{};
         samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -766,6 +1080,10 @@ void VulkanRenderer::DestroySceneTarget() {
         ImGui_ImplVulkan_RemoveTexture(m_SceneTextureDescriptor);
         m_SceneTextureDescriptor = VK_NULL_HANDLE;
     }
+
+#ifdef __ANDROID__
+    DestroySceneFramebuffer();
+#endif
 
     if (m_SceneDepthImageView != VK_NULL_HANDLE) {
         vkDestroyImageView(m_Device, m_SceneDepthImageView, nullptr);
@@ -978,7 +1296,14 @@ void VulkanRenderer::CreateGraphicsPipeline() {
 
     VkGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+#ifdef __ANDROID__
+    (void)renderingInfo;
+    pipelineInfo.pNext = nullptr;
+    pipelineInfo.renderPass = m_SceneRenderPass;
+#else
     pipelineInfo.pNext = &renderingInfo;
+    pipelineInfo.renderPass = VK_NULL_HANDLE;
+#endif
     pipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
     pipelineInfo.pStages = shaderStages.data();
     pipelineInfo.pVertexInputState = &vertexInputInfo;
@@ -990,7 +1315,6 @@ void VulkanRenderer::CreateGraphicsPipeline() {
     pipelineInfo.pColorBlendState = &colorBlending;
     pipelineInfo.pDynamicState = &dynamicState;
     pipelineInfo.layout = m_PipelineLayout;
-    pipelineInfo.renderPass = VK_NULL_HANDLE;
     pipelineInfo.subpass = 0;
 
     VkResult pipelineResult = vkCreateGraphicsPipelines(
@@ -1261,6 +1585,54 @@ VulkanRenderer::GpuTexture VulkanRenderer::CreateTextureFromRGBA(
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     CheckVkResult(vkBeginCommandBuffer(cmd, &beginInfo), "vkBeginCommandBuffer (tex upload)");
 
+#ifdef __ANDROID__
+    VkImageMemoryBarrier toTransfer{};
+    toTransfer.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    toTransfer.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    toTransfer.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    toTransfer.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toTransfer.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toTransfer.image = tex.image;
+    toTransfer.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    toTransfer.srcAccessMask = 0;
+    toTransfer.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    vkCmdPipelineBarrier(
+        cmd,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &toTransfer
+    );
+
+    VkBufferImageCopy copyRegion{};
+    copyRegion.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    copyRegion.imageExtent = {width, height, 1};
+    vkCmdCopyBufferToImage(cmd, stagingBuffer, tex.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+
+    VkImageMemoryBarrier toShaderRead{};
+    toShaderRead.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    toShaderRead.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    toShaderRead.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    toShaderRead.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toShaderRead.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    toShaderRead.image = tex.image;
+    toShaderRead.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    toShaderRead.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    toShaderRead.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    vkCmdPipelineBarrier(
+        cmd,
+        VK_PIPELINE_STAGE_TRANSFER_BIT,
+        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &toShaderRead
+    );
+
+    CheckVkResult(vkEndCommandBuffer(cmd), "vkEndCommandBuffer (tex upload)");
+
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &cmd;
+    CheckVkResult(vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, VK_NULL_HANDLE), "vkQueueSubmit (tex upload)");
+#else
     VkImageMemoryBarrier2 toTransfer{};
     toTransfer.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
     toTransfer.srcStageMask = VK_PIPELINE_STAGE_2_NONE;
@@ -1311,6 +1683,7 @@ VulkanRenderer::GpuTexture VulkanRenderer::CreateTextureFromRGBA(
     submitInfo.commandBufferInfoCount = 1;
     submitInfo.pCommandBufferInfos = &cmdSubmit;
     CheckVkResult(vkQueueSubmit2(m_GraphicsQueue, 1, &submitInfo, VK_NULL_HANDLE), "vkQueueSubmit2 (tex upload)");
+#endif
     CheckVkResult(vkQueueWaitIdle(m_GraphicsQueue), "vkQueueWaitIdle (tex upload)");
 
     vkFreeCommandBuffers(m_Device, m_Frames[0].commandPool, 1, &cmd);
@@ -1404,7 +1777,7 @@ uint64_t VulkanRenderer::CreateUITextureRGBA(uint32_t width, uint32_t height, co
         return 0;
     }
     GpuTexture tex = CreateTextureFromRGBA(width, height, rgbaPixels);
-    const uint64_t handle = reinterpret_cast<uint64_t>(tex.descriptorSet);
+    const uint64_t handle = VkDescriptorSetToU64(tex.descriptorSet);
     m_UITextures[handle] = tex;
     return handle;
 }
@@ -1616,8 +1989,7 @@ void VulkanRenderer::InitImGui() {
 #ifndef __ANDROID__
         ImGui_ImplGlfw_InitForVulkan(m_Window->GetNativeWindow(), true);
 #else
-        ImGuiIO& io = ImGui::GetIO();
-        io.DisplaySize = ImVec2(static_cast<float>(m_Extent.width), static_cast<float>(m_Extent.height));
+        ImGui_ImplAndroid_Init(m_Window->GetAndroidWindow());
 #endif
     }
 
@@ -1629,12 +2001,17 @@ void VulkanRenderer::InitImGui() {
     initInfo.Queue = m_GraphicsQueue;
     initInfo.DescriptorPool = m_ImGuiDescriptorPool;
     initInfo.MinImageCount = 2;
-    initInfo.ImageCount = m_Headless ? 2 : static_cast<uint32_t>(m_SwapchainImages.size());
+    initInfo.ImageCount = m_Headless ? 2 : std::max(2u, static_cast<uint32_t>(m_SwapchainImages.size()));
     initInfo.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+#ifdef __ANDROID__
+    initInfo.UseDynamicRendering = false;
+    initInfo.RenderPass = m_ImGuiRenderPass;
+#else
     initInfo.UseDynamicRendering = true;
     initInfo.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
     initInfo.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
     initInfo.PipelineRenderingCreateInfo.pColorAttachmentFormats = &m_ColorFormat;
+#endif
 
     if (!ImGui_ImplVulkan_Init(&initInfo)) {
         throw std::runtime_error("Failed to initialize ImGui Vulkan backend");
@@ -1648,7 +2025,7 @@ void VulkanRenderer::InitImGui() {
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     );
 
-    KM_CORE_INFO("Dear ImGui initialized (Docking + ImGuizmo + Vulkan Dynamic Rendering).");
+    KM_CORE_INFO("Dear ImGui initialized.");
 }
 
 void VulkanRenderer::ShutdownImGui() {
@@ -1660,6 +2037,8 @@ void VulkanRenderer::ShutdownImGui() {
     if (!m_Headless) {
 #ifndef __ANDROID__
         ImGui_ImplGlfw_Shutdown();
+#else
+        ImGui_ImplAndroid_Shutdown();
 #endif
     }
     ImGui::DestroyContext();
@@ -1689,7 +2068,9 @@ void VulkanRenderer::BeginImGuiFrame() {
         io.DeltaTime = 1.0f / 60.0f;
     }
 #else
-    {
+    if (!m_Headless && m_Window && m_Window->GetAndroidWindow()) {
+        ImGui_ImplAndroid_NewFrame();
+    } else {
         ImGuiIO& io = ImGui::GetIO();
         io.DisplaySize = ImVec2(static_cast<float>(m_Extent.width), static_cast<float>(m_Extent.height));
         io.DeltaTime = 1.0f / 60.0f;
@@ -1697,7 +2078,9 @@ void VulkanRenderer::BeginImGuiFrame() {
 #endif
 
     ImGui::NewFrame();
+#ifndef __ANDROID__
     ImGuizmo::BeginFrame();
+#endif
 }
 
 void VulkanRenderer::EndImGuiFrameAndDraw() {
@@ -1706,6 +2089,21 @@ void VulkanRenderer::EndImGuiFrameAndDraw() {
 }
 
 void VulkanRenderer::RecordScenePass(VkCommandBuffer cmd) {
+#ifdef __ANDROID__
+    std::array<VkClearValue, 2> clearValues{};
+    clearValues[0].color = {{m_ClearColor.r, m_ClearColor.g, m_ClearColor.b, m_ClearColor.a}};
+    clearValues[1].depthStencil = {1.0f, 0};
+
+    VkRenderPassBeginInfo rpBegin{};
+    rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    rpBegin.renderPass = m_SceneRenderPass;
+    rpBegin.framebuffer = m_SceneFramebuffer;
+    rpBegin.renderArea = {{0, 0}, m_SceneExtent};
+    rpBegin.clearValueCount = static_cast<uint32_t>(clearValues.size());
+    rpBegin.pClearValues = clearValues.data();
+
+    vkCmdBeginRenderPass(cmd, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
+#else
     std::array<VkImageMemoryBarrier2, 2> beginBarriers{};
 
     beginBarriers[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -1759,6 +2157,7 @@ void VulkanRenderer::RecordScenePass(VkCommandBuffer cmd) {
     renderingInfo.pDepthAttachment = &depthAttachment;
 
     vkCmdBeginRendering(cmd, &renderingInfo);
+#endif
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, m_GraphicsPipeline);
 
@@ -2158,6 +2557,9 @@ void VulkanRenderer::RecordScenePass(VkCommandBuffer cmd) {
         }
     }
 
+#ifdef __ANDROID__
+    vkCmdEndRenderPass(cmd);
+#else
     vkCmdEndRendering(cmd);
 
     VkImageMemoryBarrier2 toShaderReadBarrier{};
@@ -2176,14 +2578,36 @@ void VulkanRenderer::RecordScenePass(VkCommandBuffer cmd) {
     toShaderReadDep.imageMemoryBarrierCount = 1;
     toShaderReadDep.pImageMemoryBarriers = &toShaderReadBarrier;
     vkCmdPipelineBarrier2(cmd, &toShaderReadDep);
+#endif
 }
 
 void VulkanRenderer::RecordImGuiPass(
     VkCommandBuffer cmd,
     VkImage targetImage,
     VkImageView targetView,
-    VkImageLayout finalLayout
+    VkImageLayout finalLayout,
+    uint32_t swapchainImageIndex
 ) {
+#ifdef __ANDROID__
+    (void)targetImage;
+    (void)targetView;
+    (void)finalLayout;
+    VkClearValue clearVal{};
+    clearVal.color = {{0.06f, 0.06f, 0.08f, 1.0f}};
+
+    VkRenderPassBeginInfo rpBegin{};
+    rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    rpBegin.renderPass = m_ImGuiRenderPass;
+    rpBegin.framebuffer = m_SwapchainFramebuffers[swapchainImageIndex];
+    rpBegin.renderArea = {{0, 0}, m_Extent};
+    rpBegin.clearValueCount = 1;
+    rpBegin.pClearValues = &clearVal;
+
+    vkCmdBeginRenderPass(cmd, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
+    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
+    vkCmdEndRenderPass(cmd);
+#else
+    (void)swapchainImageIndex;
     VkImageMemoryBarrier2 toColorBarrier{};
     toColorBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
     toColorBarrier.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
@@ -2236,13 +2660,15 @@ void VulkanRenderer::RecordImGuiPass(
     toFinalDep.imageMemoryBarrierCount = 1;
     toFinalDep.pImageMemoryBarriers = &toFinalBarrier;
     vkCmdPipelineBarrier2(cmd, &toFinalDep);
+#endif
 }
 
 void VulkanRenderer::RecordCommandBuffer(
     VkCommandBuffer cmd,
     VkImage targetImage,
     VkImageView targetView,
-    VkImageLayout finalLayout
+    VkImageLayout finalLayout,
+    uint32_t swapchainImageIndex
 ) {
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -2251,12 +2677,17 @@ void VulkanRenderer::RecordCommandBuffer(
     CheckVkResult(vkBeginCommandBuffer(cmd, &beginInfo), "vkBeginCommandBuffer");
 
     RecordScenePass(cmd);
-    RecordImGuiPass(cmd, targetImage, targetView, finalLayout);
+    RecordImGuiPass(cmd, targetImage, targetView, finalLayout, swapchainImageIndex);
 
     CheckVkResult(vkEndCommandBuffer(cmd), "vkEndCommandBuffer");
 }
 
 void VulkanRenderer::DrawFrame() {
+#ifdef __ANDROID__
+    if (!m_Headless && (m_SurfaceSuspended || m_Swapchain == VK_NULL_HANDLE || m_Surface == VK_NULL_HANDLE)) {
+        return;
+    }
+#endif
     FrameData& frame = m_Frames[m_CurrentFrame];
 
     CheckVkResult(
@@ -2268,8 +2699,15 @@ void VulkanRenderer::DrawFrame() {
         CheckVkResult(vkResetFences(m_Device, 1, &frame.inFlightFence), "vkResetFences");
         CheckVkResult(vkResetCommandBuffer(frame.commandBuffer, 0), "vkResetCommandBuffer");
 
-        RecordCommandBuffer(frame.commandBuffer, m_HeadlessImage, m_HeadlessImageView, VK_IMAGE_LAYOUT_GENERAL);
+        RecordCommandBuffer(frame.commandBuffer, m_HeadlessImage, m_HeadlessImageView, VK_IMAGE_LAYOUT_GENERAL, 0);
 
+#ifdef __ANDROID__
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submitInfo.commandBufferCount = 1;
+        submitInfo.pCommandBuffers = &frame.commandBuffer;
+        CheckVkResult(vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, frame.inFlightFence), "vkQueueSubmit (headless)");
+#else
         VkCommandBufferSubmitInfo cmdSubmitInfo{};
         cmdSubmitInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO;
         cmdSubmitInfo.commandBuffer = frame.commandBuffer;
@@ -2280,6 +2718,7 @@ void VulkanRenderer::DrawFrame() {
         submitInfo.pCommandBufferInfos = &cmdSubmitInfo;
 
         CheckVkResult(vkQueueSubmit2(m_GraphicsQueue, 1, &submitInfo, frame.inFlightFence), "vkQueueSubmit2 (headless)");
+#endif
         m_CurrentFrame = (m_CurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
         return;
     }
@@ -2298,6 +2737,11 @@ void VulkanRenderer::DrawFrame() {
         RecreateSwapchain();
         return;
     }
+#ifdef __ANDROID__
+    if (acquireResult == VK_ERROR_SURFACE_LOST_KHR) {
+        return;
+    }
+#endif
     if (acquireResult != VK_SUCCESS && acquireResult != VK_SUBOPTIMAL_KHR) {
         CheckVkResult(acquireResult, "vkAcquireNextImageKHR");
     }
@@ -2309,9 +2753,23 @@ void VulkanRenderer::DrawFrame() {
         frame.commandBuffer,
         m_SwapchainImages[imageIndex],
         m_SwapchainImageViews[imageIndex],
-        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
+        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        imageIndex
     );
 
+#ifdef __ANDROID__
+    const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkSubmitInfo submitInfo{};
+    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submitInfo.waitSemaphoreCount = 1;
+    submitInfo.pWaitSemaphores = &frame.imageAvailableSemaphore;
+    submitInfo.pWaitDstStageMask = &waitStage;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &frame.commandBuffer;
+    submitInfo.signalSemaphoreCount = 1;
+    submitInfo.pSignalSemaphores = &m_RenderFinishedSemaphores[imageIndex];
+    CheckVkResult(vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, frame.inFlightFence), "vkQueueSubmit");
+#else
     VkSemaphoreSubmitInfo waitSemaphoreInfo{};
     waitSemaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO;
     waitSemaphoreInfo.semaphore = frame.imageAvailableSemaphore;
@@ -2336,6 +2794,7 @@ void VulkanRenderer::DrawFrame() {
     submitInfo.pSignalSemaphoreInfos = &signalSemaphoreInfo;
 
     CheckVkResult(vkQueueSubmit2(m_GraphicsQueue, 1, &submitInfo, frame.inFlightFence), "vkQueueSubmit2");
+#endif
 
     VkPresentInfoKHR presentInfo{};
     presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -2351,7 +2810,11 @@ void VulkanRenderer::DrawFrame() {
         m_Window->WasResized()) {
         m_Window->ResetResizedFlag();
         RecreateSwapchain();
-    } else if (presentResult != VK_SUCCESS) {
+    } else if (presentResult != VK_SUCCESS
+#ifdef __ANDROID__
+               && presentResult != VK_ERROR_SURFACE_LOST_KHR
+#endif
+    ) {
         CheckVkResult(presentResult, "vkQueuePresentKHR");
     }
 

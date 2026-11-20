@@ -1780,7 +1780,32 @@ bool ProjectManager::DownloadExportTemplate(ExportPlatform platform, std::string
             ec
         );
         std::filesystem::remove(archivePath, ec);
-        return !ec;
+        if (ec) {
+            return false;
+        }
+
+        const std::filesystem::path d8Stage = dlDir / "KymEngine-android-d8.jar";
+        const std::string d8Urls[] = {
+            "https://github.com/Alberto-devi/KymEngine/releases/download/v" + std::string(KM_ENGINE_VERSION) + "/KymEngine-android-d8.jar",
+            "https://github.com/Alberto-devi/KymEngine/releases/latest/download/KymEngine-android-d8.jar"
+        };
+        for (const auto& d8Url : d8Urls) {
+            const std::string d8Cmd =
+                "curl -fL --retry 2 --connect-timeout 15 -H \"User-Agent: KymEngine\" -o " +
+                QuoteShellArg(PlatformPaths::PathToUtf8(d8Stage)) + " " + QuoteShellArg(d8Url);
+            if (RunQuietCommand(d8Cmd) == 0 && std::filesystem::exists(d8Stage, ec)) {
+                std::filesystem::copy_file(
+                    d8Stage,
+                    targetRoot / "KymEngine-android-d8.jar",
+                    std::filesystem::copy_options::overwrite_existing,
+                    ec
+                );
+                std::filesystem::remove(d8Stage, ec);
+                break;
+            }
+            std::filesystem::remove(d8Stage, ec);
+        }
+        return true;
     }
 
     const std::string extractFlag = (platform == ExportPlatform::WindowsX64) ? "-xf" : "-xzf";
@@ -1835,6 +1860,434 @@ bool ProjectManager::ExportProjectForPlatform(const ExportOptions& options, std:
     }
 
     const std::filesystem::path projDir = GetActiveProjectDir();
+    const std::string baseName = SanitizeExecutableName(
+        options.executableName.empty() ? s_Proj.activeConfig.name : options.executableName
+    );
+
+    if (options.platform == ExportPlatform::AndroidAPK) {
+        const std::filesystem::path tplApk = templateDir / "KymEngine-android-template.apk";
+        const std::filesystem::path outApk = options.outputDir / (baseName + ".apk");
+        std::filesystem::copy_file(tplApk, outApk, std::filesystem::copy_options::overwrite_existing, ec);
+        if (ec) {
+            return setErr("No se pudo copiar la plantilla APK: " + ec.message());
+        }
+
+        auto toolExists = [](const std::string& bin) -> bool {
+#ifdef _WIN32
+            return RunQuietCommand("where " + bin + " >nul 2>&1") == 0;
+#else
+            return RunQuietCommand("command -v " + bin + " >/dev/null 2>&1") == 0;
+#endif
+        };
+
+        auto getSdkRoots = []() -> std::vector<std::filesystem::path> {
+            std::vector<std::filesystem::path> sdkRoots;
+            if (const char* envHome = std::getenv("ANDROID_HOME")) {
+                if (*envHome != '\0') sdkRoots.emplace_back(envHome);
+            }
+            if (const char* envSdk = std::getenv("ANDROID_SDK_ROOT")) {
+                if (*envSdk != '\0') sdkRoots.emplace_back(envSdk);
+            }
+#ifdef _WIN32
+            if (const char* localApp = std::getenv("LOCALAPPDATA")) {
+                sdkRoots.push_back(std::filesystem::path(localApp) / "Android" / "Sdk");
+            }
+#else
+            if (const char* home = std::getenv("HOME")) {
+                sdkRoots.push_back(std::filesystem::path(home) / "Android" / "Sdk");
+            }
+            sdkRoots.emplace_back("/usr/lib/android-sdk");
+#endif
+            return sdkRoots;
+        };
+
+        auto findAndroidTool = [&](const std::string& toolName) -> std::string {
+#ifdef _WIN32
+            for (const std::string& candName : {toolName + ".bat", toolName + ".exe", toolName}) {
+                if (toolExists(candName)) {
+                    return candName;
+                }
+            }
+            std::error_code tec;
+            for (const auto& root : getSdkRoots()) {
+                const std::filesystem::path bt = root / "build-tools";
+                if (!std::filesystem::exists(bt, tec)) continue;
+                for (const auto& verDir : std::filesystem::directory_iterator(bt, tec)) {
+                    for (const std::string& ext : {".bat", ".exe", ""}) {
+                        const std::filesystem::path cand = verDir.path() / (toolName + ext);
+                        if (std::filesystem::exists(cand, tec)) {
+                            return QuoteShellArg(PlatformPaths::PathToUtf8(cand));
+                        }
+                    }
+                }
+            }
+#else
+            if (toolExists(toolName)) {
+                return toolName;
+            }
+            std::error_code tec;
+            for (const auto& root : getSdkRoots()) {
+                const std::filesystem::path bt = root / "build-tools";
+                if (!std::filesystem::exists(bt, tec)) continue;
+                for (const auto& verDir : std::filesystem::directory_iterator(bt, tec)) {
+                    const std::filesystem::path cand = verDir.path() / toolName;
+                    if (std::filesystem::exists(cand, tec) && !std::filesystem::is_directory(cand, tec)) {
+                        return QuoteShellArg(PlatformPaths::PathToUtf8(cand));
+                    }
+                }
+            }
+#endif
+            return {};
+        };
+
+        auto findJavaTool = [&](const std::string& toolName) -> std::string {
+            std::error_code tec;
+#ifdef _WIN32
+            const std::string exeSuffix = ".exe";
+#else
+            const std::string exeSuffix;
+#endif
+            const std::filesystem::path exeDir = PlatformPaths::GetExecutableDir();
+            const std::filesystem::path bundled = exeDir / "jre" / "bin" / (toolName + exeSuffix);
+            if (std::filesystem::exists(bundled, tec)) {
+                return QuoteShellArg(PlatformPaths::PathToUtf8(bundled));
+            }
+            if (const char* javaHome = std::getenv("JAVA_HOME")) {
+                if (*javaHome != '\0') {
+                    const std::filesystem::path cand = std::filesystem::path(javaHome) / "bin" / (toolName + exeSuffix);
+                    if (std::filesystem::exists(cand, tec)) {
+                        return QuoteShellArg(PlatformPaths::PathToUtf8(cand));
+                    }
+                }
+            }
+#ifdef KM_JAVAC_EXECUTABLE
+            {
+                const std::filesystem::path javacDir = std::filesystem::path(KM_JAVAC_EXECUTABLE).parent_path();
+                const std::filesystem::path cand = javacDir / (toolName + exeSuffix);
+                if (std::filesystem::exists(cand, tec)) {
+                    return QuoteShellArg(PlatformPaths::PathToUtf8(cand));
+                }
+            }
+#endif
+            if (toolExists(toolName)) {
+                return toolName;
+            }
+            return {};
+        };
+
+        auto findD8Jar = [&]() -> std::filesystem::path {
+            std::error_code tec;
+            const std::filesystem::path exeDir = PlatformPaths::GetExecutableDir();
+            const std::filesystem::path directCandidates[] = {
+                templateDir / "KymEngine-android-d8.jar",
+                templateDir / "d8.jar",
+                exeDir / "java" / "d8.jar",
+                exeDir / "d8.jar",
+                PlatformPaths::GetUserDataDir() / "templates" / KM_ENGINE_VERSION / "android-apk" / "KymEngine-android-d8.jar",
+                PlatformPaths::GetUserDataDir() / "templates" / "latest" / "android-apk" / "KymEngine-android-d8.jar"
+            };
+            for (const auto& c : directCandidates) {
+                if (std::filesystem::exists(c, tec)) {
+                    return c;
+                }
+            }
+            for (const auto& root : getSdkRoots()) {
+                const std::filesystem::path bt = root / "build-tools";
+                if (!std::filesystem::exists(bt, tec)) continue;
+                for (const auto& verDir : std::filesystem::directory_iterator(bt, tec)) {
+                    const std::filesystem::path cand = verDir.path() / "lib" / "d8.jar";
+                    if (std::filesystem::exists(cand, tec)) {
+                        return cand;
+                    }
+                }
+            }
+            return {};
+        };
+
+        auto readLogFile = [](const std::filesystem::path& p) -> std::string {
+            std::ifstream in(p);
+            if (!in.is_open()) return {};
+            std::string content((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+            if (content.size() > 1200) {
+                content.resize(1200);
+                content += "\n...";
+            }
+            return content;
+        };
+
+        // Copy project assets + input_map.json + shaders + fonts into staging assets/ folder
+        const std::filesystem::path stageRoot = options.outputDir / ".apk_stage";
+        const std::filesystem::path stageAssets = stageRoot / "assets";
+        std::filesystem::remove_all(stageRoot, ec);
+        std::filesystem::create_directories(stageAssets, ec);
+
+        const std::vector<std::string> androidFolders = {
+            "scenes", "scripts", "models", "materials", "textures", "audio", "prefabs", "ui"
+        };
+        for (const auto& f : androidFolders) {
+            const std::filesystem::path src = projDir / f;
+            if (std::filesystem::exists(src, ec)) {
+                std::filesystem::copy(
+                    src, stageAssets / f,
+                    std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing, ec
+                );
+            }
+        }
+        for (const char* rootFile : {"project.kmproj", "input_map.json"}) {
+            if (std::filesystem::exists(projDir / rootFile, ec)) {
+                std::filesystem::copy_file(
+                    projDir / rootFile, stageAssets / rootFile,
+                    std::filesystem::copy_options::overwrite_existing, ec
+                );
+            }
+        }
+
+        const std::filesystem::path shadersSrc = PlatformPaths::ResolveShadersDir();
+        if (std::filesystem::exists(shadersSrc, ec)) {
+            std::filesystem::create_directories(stageAssets / "shaders", ec);
+            for (const auto& entry : std::filesystem::directory_iterator(shadersSrc, ec)) {
+                if (entry.is_regular_file(ec) && entry.path().extension() == ".spv") {
+                    std::filesystem::copy_file(
+                        entry.path(), stageAssets / "shaders" / entry.path().filename(),
+                        std::filesystem::copy_options::overwrite_existing, ec
+                    );
+                }
+            }
+        }
+
+        const std::filesystem::path fontsSrc = PlatformPaths::ResolveAssetsDir() / "fonts";
+        if (std::filesystem::exists(fontsSrc, ec) && std::filesystem::is_directory(fontsSrc, ec)) {
+            std::filesystem::create_directories(stageAssets / "fonts", ec);
+            for (const auto& entry : std::filesystem::directory_iterator(fontsSrc, ec)) {
+                if (entry.is_regular_file(ec)) {
+                    std::filesystem::copy_file(
+                        entry.path(), stageAssets / "fonts" / entry.path().filename(),
+                        std::filesystem::copy_options::overwrite_existing, ec
+                    );
+                }
+            }
+        }
+
+        // Compile scripts/*.java into assets/scripts.dex for Android ART
+        std::vector<std::filesystem::path> javaFiles;
+        const std::filesystem::path scriptsSrcDir = projDir / "scripts";
+        if (std::filesystem::exists(scriptsSrcDir, ec)) {
+            for (const auto& entry : std::filesystem::recursive_directory_iterator(scriptsSrcDir, ec)) {
+                if (entry.is_regular_file(ec) && entry.path().extension() == ".java") {
+                    javaFiles.push_back(entry.path());
+                }
+            }
+        }
+
+        const std::string jarBin = findJavaTool("jar");
+        if (!javaFiles.empty()) {
+            const std::filesystem::path apiJarCandidates[] = {
+                templateDir / "java" / "kyumist-api.jar",
+                PlatformPaths::ResolveJavaApiJar()
+            };
+            std::filesystem::path apiJar;
+            for (const auto& c : apiJarCandidates) {
+                if (std::filesystem::exists(c, ec)) {
+                    apiJar = c;
+                    break;
+                }
+            }
+            if (apiJar.empty()) {
+                std::filesystem::remove_all(stageRoot, ec);
+                std::filesystem::remove(outApk, ec);
+                return setErr("No se encontro kyumist-api.jar para compilar los scripts Android.");
+            }
+
+            const std::string javacBin = findJavaTool("javac");
+            const std::string javaBin = findJavaTool("java");
+            if (javacBin.empty() || jarBin.empty() || javaBin.empty()) {
+                std::filesystem::remove_all(stageRoot, ec);
+                std::filesystem::remove(outApk, ec);
+                return setErr("Se requiere un JDK completo (javac, jar, java) para exportar a Android.");
+            }
+
+            std::filesystem::path d8Jar = findD8Jar();
+            std::string d8Bin = findAndroidTool("d8");
+            if (d8Jar.empty() && d8Bin.empty() && options.downloadTemplateIfMissing) {
+                const std::filesystem::path dlD8 = templateDir / "KymEngine-android-d8.jar";
+                const std::string d8Urls[] = {
+                    "https://github.com/Alberto-devi/KymEngine/releases/download/v" + std::string(KM_ENGINE_VERSION) + "/KymEngine-android-d8.jar",
+                    "https://github.com/Alberto-devi/KymEngine/releases/latest/download/KymEngine-android-d8.jar"
+                };
+                for (const auto& u : d8Urls) {
+                    const std::string dlCmd =
+                        "curl -fL --retry 2 --connect-timeout 15 -H \"User-Agent: KymEngine\" -o " +
+                        QuoteShellArg(PlatformPaths::PathToUtf8(dlD8)) + " " + QuoteShellArg(u);
+                    if (RunQuietCommand(dlCmd) == 0 && std::filesystem::exists(dlD8, ec)) {
+                        d8Jar = dlD8;
+                        break;
+                    }
+                    std::filesystem::remove(dlD8, ec);
+                }
+            }
+            const std::string dxBin = (d8Jar.empty() && d8Bin.empty()) ? findAndroidTool("dx") : std::string();
+
+            if (d8Jar.empty() && d8Bin.empty() && dxBin.empty()) {
+                std::filesystem::remove_all(stageRoot, ec);
+                std::filesystem::remove(outApk, ec);
+                return setErr(
+                    "No se encontro 'd8', 'd8.jar' ni 'dx' para convertir los scripts Java a Android DEX. "
+                    "Descarga la plantilla v0.4.0+ o instala Android SDK Build-Tools."
+                );
+            }
+
+            const std::filesystem::path stageClasses = stageRoot / "classes";
+            const std::filesystem::path stageDex = stageRoot / "dex";
+            const std::filesystem::path javacLog = stageRoot / "javac.log";
+            const std::filesystem::path d8Log = stageRoot / "d8.log";
+            std::filesystem::create_directories(stageClasses, ec);
+            std::filesystem::create_directories(stageDex, ec);
+
+            const bool useD8 = (!d8Jar.empty() || !d8Bin.empty());
+            std::string javacArgs =
+                std::string(useD8 ? "--release 17 " : "--release 8 ") +
+                "-cp " + QuoteShellArg(PlatformPaths::PathToUtf8(apiJar)) +
+                " -d " + QuoteShellArg(PlatformPaths::PathToUtf8(stageClasses));
+            for (const auto& jf : javaFiles) {
+                javacArgs += " " + QuoteShellArg(PlatformPaths::PathToUtf8(jf));
+            }
+
+            const std::string javacCmd =
+                javacBin + " " + javacArgs + " > " +
+                QuoteShellArg(PlatformPaths::PathToUtf8(javacLog)) + " 2>&1";
+            if (RunQuietCommand(javacCmd) != 0) {
+                const std::string errTxt = readLogFile(javacLog);
+                std::filesystem::remove_all(stageRoot, ec);
+                std::filesystem::remove(outApk, ec);
+                return setErr("Error compilando scripts Java para Android:\n" + errTxt);
+            }
+
+            const std::filesystem::path outDex = stageAssets / "scripts.dex";
+            if (useD8) {
+                const std::filesystem::path userJar = stageRoot / "user-scripts.jar";
+                const std::string jarPackCmd =
+                    jarBin + " cf " + QuoteShellArg(PlatformPaths::PathToUtf8(userJar)) +
+                    " -C " + QuoteShellArg(PlatformPaths::PathToUtf8(stageClasses)) + " .";
+                if (RunQuietCommand(jarPackCmd) != 0 || !std::filesystem::exists(userJar, ec)) {
+                    std::filesystem::remove_all(stageRoot, ec);
+                    std::filesystem::remove(outApk, ec);
+                    return setErr("No se pudo empaquetar user-scripts.jar para d8.");
+                }
+
+                const std::string d8CmdPrefix = !d8Jar.empty()
+                    ? (javaBin + " -cp " + QuoteShellArg(PlatformPaths::PathToUtf8(d8Jar)) + " com.android.tools.r8.D8")
+                    : d8Bin;
+                const std::string d8Cmd =
+                    d8CmdPrefix + " --min-api 26" +
+                    " --classpath " + QuoteShellArg(PlatformPaths::PathToUtf8(apiJar)) +
+                    " --output " + QuoteShellArg(PlatformPaths::PathToUtf8(stageDex)) +
+                    " " + QuoteShellArg(PlatformPaths::PathToUtf8(userJar)) +
+                    " > " + QuoteShellArg(PlatformPaths::PathToUtf8(d8Log)) + " 2>&1";
+                const std::filesystem::path builtDex = stageDex / "classes.dex";
+                if (RunQuietCommand(d8Cmd) != 0 || !std::filesystem::exists(builtDex, ec)) {
+                    const std::string errTxt = readLogFile(d8Log);
+                    std::filesystem::remove_all(stageRoot, ec);
+                    std::filesystem::remove(outApk, ec);
+                    return setErr("Error convirtiendo scripts Java a Android DEX (d8):\n" + errTxt);
+                }
+                std::filesystem::copy_file(builtDex, outDex, std::filesystem::copy_options::overwrite_existing, ec);
+            } else {
+                const std::string dxCmd =
+                    dxBin + " --dex --output=" + QuoteShellArg(PlatformPaths::PathToUtf8(outDex)) +
+                    " " + QuoteShellArg(PlatformPaths::PathToUtf8(stageClasses)) +
+                    " > " + QuoteShellArg(PlatformPaths::PathToUtf8(d8Log)) + " 2>&1";
+                if (RunQuietCommand(dxCmd) != 0 || !std::filesystem::exists(outDex, ec)) {
+                    const std::string errTxt = readLogFile(d8Log);
+                    std::filesystem::remove_all(stageRoot, ec);
+                    std::filesystem::remove(outApk, ec);
+                    return setErr("Error convirtiendo scripts Java a Android DEX (dx):\n" + errTxt);
+                }
+            }
+            KM_INFO("Scripts Java compilados a Android DEX ('{}' scripts).", javaFiles.size());
+        }
+
+        // Remove temporary staging directories outside stageAssets before injecting into APK
+        std::filesystem::remove_all(stageRoot / "classes", ec);
+        std::filesystem::remove_all(stageRoot / "dex", ec);
+        std::filesystem::remove(stageRoot / "user-scripts.jar", ec);
+        std::filesystem::remove(stageRoot / "javac.log", ec);
+        std::filesystem::remove(stageRoot / "d8.log", ec);
+
+        // Inject assets/ into the APK using jar (comes with JDK) or zip
+        const std::string jarExe = !jarBin.empty() ? jarBin : std::string("jar");
+        const std::string injectCmd =
+            "cd " + QuoteShellArg(PlatformPaths::PathToUtf8(stageRoot)) +
+            " && " + jarExe + " uf " + QuoteShellArg(PlatformPaths::PathToUtf8(outApk)) + " assets";
+        int injectRc = RunQuietCommand(injectCmd);
+#ifndef _WIN32
+        if (injectRc != 0 && toolExists("zip")) {
+            const std::string zipInjectCmd =
+                "cd " + QuoteShellArg(PlatformPaths::PathToUtf8(stageRoot)) +
+                " && zip -qr " + QuoteShellArg(PlatformPaths::PathToUtf8(outApk)) + " assets";
+            injectRc = RunQuietCommand(zipInjectCmd);
+        }
+#endif
+        std::filesystem::remove_all(stageRoot, ec);
+        if (injectRc != 0) {
+            return setErr("No se pudieron inyectar los assets en el APK (se requiere 'jar' o 'zip').");
+        }
+
+        const std::string zipalignBin = findAndroidTool("zipalign");
+        if (!zipalignBin.empty()) {
+            const std::filesystem::path alignedApk = options.outputDir / (baseName + ".aligned.apk");
+            const std::string alignCmd =
+                zipalignBin + " -f -p 4 " +
+                QuoteShellArg(PlatformPaths::PathToUtf8(outApk)) + " " +
+                QuoteShellArg(PlatformPaths::PathToUtf8(alignedApk));
+            if (RunQuietCommand(alignCmd) == 0 && std::filesystem::exists(alignedApk, ec)) {
+                std::filesystem::rename(alignedApk, outApk, ec);
+            } else {
+                std::filesystem::remove(alignedApk, ec);
+                KM_WARN("zipalign fallo al alinear '{}'.", PlatformPaths::PathToUtf8(outApk));
+            }
+        } else {
+            KM_WARN("zipalign no encontrado; el APK podria fallar en Android 11+ (instala 'zipalign').");
+        }
+
+        // Sign with debug keystore (prefer apksigner for v2/v3 required on Android 11+, fallback to jarsigner)
+        const std::filesystem::path debugKeystore = PlatformPaths::GetUserDataDir() / "android_debug.keystore";
+        if (!std::filesystem::exists(debugKeystore, ec)) {
+            std::filesystem::create_directories(debugKeystore.parent_path(), ec);
+            const std::string keytoolExe = findJavaTool("keytool");
+            const std::string kt = !keytoolExe.empty() ? keytoolExe : std::string("keytool");
+            const std::string keyCmd =
+                kt + " -genkeypair -v -keystore " + QuoteShellArg(PlatformPaths::PathToUtf8(debugKeystore)) +
+                " -alias kymdebug -keyalg RSA -keysize 2048 -validity 10000"
+                " -storepass android -keypass android -dname \"CN=KymEngine,O=Kyumist,C=ES\"";
+            (void)RunQuietCommand(keyCmd);
+        }
+        if (std::filesystem::exists(debugKeystore, ec)) {
+            const std::string apksignerBin = findAndroidTool("apksigner");
+            if (!apksignerBin.empty()) {
+                const std::string signCmd =
+                    apksignerBin + " sign --ks " + QuoteShellArg(PlatformPaths::PathToUtf8(debugKeystore)) +
+                    " --ks-key-alias kymdebug --ks-pass pass:android --key-pass pass:android " +
+                    QuoteShellArg(PlatformPaths::PathToUtf8(outApk));
+                if (RunQuietCommand(signCmd) != 0) {
+                    KM_WARN("apksigner fallo al firmar '{}'.", PlatformPaths::PathToUtf8(outApk));
+                }
+            } else {
+                KM_WARN("apksigner no encontrado (usando jarsigner v1); Android 11+ requiere firma v2/v3 (instala 'apksigner').");
+                const std::string jarsignerExe = findJavaTool("jarsigner");
+                const std::string js = !jarsignerExe.empty() ? jarsignerExe : std::string("jarsigner");
+                const std::string signCmd =
+                    js + " -keystore " + QuoteShellArg(PlatformPaths::PathToUtf8(debugKeystore)) +
+                    " -storepass android -keypass android " +
+                    QuoteShellArg(PlatformPaths::PathToUtf8(outApk)) + " kymdebug";
+                (void)RunQuietCommand(signCmd);
+            }
+        }
+
+        KM_INFO("Proyecto '{}' exportado para Android en '{}'.",
+                s_Proj.activeConfig.name, PlatformPaths::PathToUtf8(outApk));
+        return true;
+    }
+
     const std::vector<std::string> foldersToCopy = {
         "scenes", "scripts", "models", "materials", "textures", "audio", "prefabs", "ui"
     };
@@ -1869,146 +2322,6 @@ bool ProjectManager::ExportProjectForPlatform(const ExportOptions& options, std:
             std::filesystem::copy_options::overwrite_existing,
             ec
         );
-    }
-
-    const std::string baseName = SanitizeExecutableName(
-        options.executableName.empty() ? s_Proj.activeConfig.name : options.executableName
-    );
-
-    if (options.platform == ExportPlatform::AndroidAPK) {
-        const std::filesystem::path tplApk = templateDir / "KymEngine-android-template.apk";
-        const std::filesystem::path outApk = options.outputDir / (baseName + ".apk");
-        std::filesystem::copy_file(tplApk, outApk, std::filesystem::copy_options::overwrite_existing, ec);
-        if (ec) {
-            return setErr("No se pudo copiar la plantilla APK: " + ec.message());
-        }
-
-        // Copy project assets + input_map.json + shaders into staging assets/ folder
-        const std::filesystem::path stageRoot = options.outputDir / ".apk_stage";
-        const std::filesystem::path stageAssets = stageRoot / "assets";
-        std::filesystem::remove_all(stageRoot, ec);
-        std::filesystem::create_directories(stageAssets, ec);
-
-        const std::vector<std::string> androidFolders = {
-            "scenes", "scripts", "models", "materials", "textures", "audio", "prefabs", "ui"
-        };
-        for (const auto& f : androidFolders) {
-            const std::filesystem::path src = projDir / f;
-            if (std::filesystem::exists(src, ec)) {
-                std::filesystem::copy(
-                    src, stageAssets / f,
-                    std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing, ec
-                );
-            }
-        }
-        for (const char* rootFile : {"project.kmproj", "input_map.json"}) {
-            if (std::filesystem::exists(projDir / rootFile, ec)) {
-                std::filesystem::copy_file(
-                    projDir / rootFile, stageAssets / rootFile,
-                    std::filesystem::copy_options::overwrite_existing, ec
-                );
-            }
-        }
-
-        const std::filesystem::path shadersSrc = PlatformPaths::ResolveShadersDir();
-        if (std::filesystem::exists(shadersSrc, ec)) {
-            std::filesystem::create_directories(stageAssets / "shaders", ec);
-            for (const auto& entry : std::filesystem::directory_iterator(shadersSrc, ec)) {
-                if (entry.is_regular_file() && entry.path().extension() == ".spv") {
-                    std::filesystem::copy_file(
-                        entry.path(), stageAssets / "shaders" / entry.path().filename(),
-                        std::filesystem::copy_options::overwrite_existing, ec
-                    );
-                }
-            }
-        }
-
-        // Inject assets/ into the APK using jar (comes with JDK) or zip
-        const std::string injectCmd =
-            "cd " + QuoteShellArg(PlatformPaths::PathToUtf8(stageRoot)) +
-            " && jar uf " + QuoteShellArg(PlatformPaths::PathToUtf8(outApk)) + " assets";
-        (void)RunQuietCommand(injectCmd);
-        std::filesystem::remove_all(stageRoot, ec);
-
-        // Locate zipalign and apksigner (PATH or Android SDK build-tools)
-        auto findAndroidTool = [](const std::string& toolName) -> std::string {
-#ifndef _WIN32
-            if (RunQuietCommand("command -v " + toolName + " >/dev/null 2>&1")) {
-                return toolName;
-            }
-            std::vector<std::filesystem::path> sdkRoots;
-            if (const char* envHome = std::getenv("ANDROID_HOME")) {
-                sdkRoots.emplace_back(envHome);
-            }
-            if (const char* envSdk = std::getenv("ANDROID_SDK_ROOT")) {
-                sdkRoots.emplace_back(envSdk);
-            }
-            if (const char* home = std::getenv("HOME")) {
-                sdkRoots.push_back(std::filesystem::path(home) / "Android" / "Sdk");
-            }
-            std::error_code tec;
-            for (const auto& root : sdkRoots) {
-                const std::filesystem::path bt = root / "build-tools";
-                if (!std::filesystem::exists(bt, tec)) {
-                    continue;
-                }
-                for (const auto& verDir : std::filesystem::directory_iterator(bt, tec)) {
-                    const std::filesystem::path cand = verDir.path() / toolName;
-                    if (std::filesystem::is_regular_file(cand, tec)) {
-                        return QuoteShellArg(PlatformPaths::PathToUtf8(cand));
-                    }
-                }
-            }
-#endif
-            return {};
-        };
-
-        const std::string zipalignBin = findAndroidTool("zipalign");
-        if (!zipalignBin.empty()) {
-            const std::filesystem::path alignedApk = options.outputDir / (baseName + ".aligned.apk");
-            const std::string alignCmd =
-                zipalignBin + " -f -p 4 " +
-                QuoteShellArg(PlatformPaths::PathToUtf8(outApk)) + " " +
-                QuoteShellArg(PlatformPaths::PathToUtf8(alignedApk));
-            if (RunQuietCommand(alignCmd) && std::filesystem::exists(alignedApk, ec)) {
-                std::filesystem::rename(alignedApk, outApk, ec);
-            }
-        } else {
-            KM_WARN("zipalign no encontrado; el APK podria fallar en Android 11+ (instala 'zipalign').");
-        }
-
-        // Sign with debug keystore (prefer apksigner for v2/v3 required on Android 11+, fallback to jarsigner)
-        const std::filesystem::path debugKeystore = PlatformPaths::GetUserDataDir() / "android_debug.keystore";
-        if (!std::filesystem::exists(debugKeystore, ec)) {
-            const std::string keyCmd =
-                "keytool -genkeypair -v -keystore " + QuoteShellArg(PlatformPaths::PathToUtf8(debugKeystore)) +
-                " -alias kymdebug -keyalg RSA -keysize 2048 -validity 10000"
-                " -storepass android -keypass android -dname \"CN=KymEngine,O=Kyumist,C=ES\"";
-            (void)RunQuietCommand(keyCmd);
-        }
-        if (std::filesystem::exists(debugKeystore, ec)) {
-            const std::string apksignerBin = findAndroidTool("apksigner");
-            if (!apksignerBin.empty()) {
-                const std::string signCmd =
-                    apksignerBin + " sign --ks " + QuoteShellArg(PlatformPaths::PathToUtf8(debugKeystore)) +
-                    " --ks-key-alias kymdebug --ks-pass pass:android --key-pass pass:android " +
-                    QuoteShellArg(PlatformPaths::PathToUtf8(outApk));
-                if (!RunQuietCommand(signCmd)) {
-                    KM_WARN("apksigner fallo al firmar '{}'.", PlatformPaths::PathToUtf8(outApk));
-                }
-            } else {
-                KM_WARN("apksigner no encontrado (usando jarsigner v1); Android 11+ requiere firma v2/v3 (instala 'apksigner').");
-                const std::string signCmd =
-                    "jarsigner -keystore " + QuoteShellArg(PlatformPaths::PathToUtf8(debugKeystore)) +
-                    " -storepass android -keypass android " +
-                    QuoteShellArg(PlatformPaths::PathToUtf8(outApk)) + " kymdebug";
-                (void)RunQuietCommand(signCmd);
-            }
-        }
-
-        KM_INFO("Proyecto '{}' exportado para Android en '{}'.",
-                s_Proj.activeConfig.name, PlatformPaths::PathToUtf8(outApk));
-        return true;
     }
 
     const std::string runtimeSrcName = RuntimeFileName(options.platform);

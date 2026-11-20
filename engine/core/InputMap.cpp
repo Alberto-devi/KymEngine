@@ -41,6 +41,15 @@ void InputMap::InitDefaults() {
     s_Input.actions["action"] = {{InputDeviceType::Key, GLFW_KEY_E}, {InputDeviceType::MouseButton, GLFW_MOUSE_BUTTON_LEFT}};
     s_Input.actions["sprint"] = {{InputDeviceType::Key, GLFW_KEY_LEFT_SHIFT}};
     s_Input.actions["cancel"] = {{InputDeviceType::Key, GLFW_KEY_ESCAPE}};
+#else
+    s_Input.actions["move_forward"] = {};
+    s_Input.actions["move_back"] = {};
+    s_Input.actions["move_left"] = {};
+    s_Input.actions["move_right"] = {};
+    s_Input.actions["jump"] = {};
+    s_Input.actions["action"] = {};
+    s_Input.actions["sprint"] = {};
+    s_Input.actions["cancel"] = {};
 #endif
     s_Input.initialized = true;
 }

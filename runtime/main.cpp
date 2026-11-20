@@ -139,7 +139,11 @@ protected:
         VkDescriptorSet sceneDesc = GetRenderer()->GetSceneTextureDescriptor();
         if (sceneDesc != VK_NULL_HANDLE) {
             ImDrawList* bg = ImGui::GetBackgroundDrawList();
-            bg->AddImage(reinterpret_cast<ImTextureID>(sceneDesc), ImVec2(0.0f, 0.0f), io.DisplaySize);
+            bg->AddImage(
+                static_cast<ImTextureID>(Kyumist::VkDescriptorSetToU64(sceneDesc)),
+                ImVec2(0.0f, 0.0f),
+                io.DisplaySize
+            );
 
             // Render in-game UI Text HUD components
             const auto& reg = m_Scene.GetRegistry();

@@ -1,7 +1,7 @@
 # Kyumist Engine — Hoja de Ruta y Progreso
 
-> **Última actualización:** 2026-11-18  
-> **Estado actual:** Todas las fases base completadas (Fases 0 a 5 implementadas y verificadas)
+> **Última actualización:** 2026-11-20  
+> **Estado actual:** v0.4.0 implementada (Fases 0 a 5, Fase 7 v0.3.x y Runtime Completo Android NDK + ART/DEX)
 
 Este documento resume lo que ya está implementado y verificado en **Kyumist Engine**, junto con posibles ampliaciones futuras.
 
@@ -105,9 +105,15 @@ Este documento resume lo que ya está implementado y verificado en **Kyumist Eng
 
 ---
 
-## 🔜 Siguiente Paso Prioritario (v0.4.0) — Runtime Completo en Android NDK
-- [ ] **Portar `kyumist_engine` a Android NDK**: reemplazar GLFW por `ANativeWindow` / `AInputEvent` y `VK_KHR_android_surface` en `Window` y `VulkanRenderer`, compilando las dependencias nativas (`VMA`, `RmlUi`, `Freetype`, `miniaudio`, `ImGui`) para `arm64-v8a` y `armeabi-v7a`.
-- [ ] **Scripting Java sobre Android ART/DEX**: compilar los scripts `.java` del juego a `.dex` durante la exportación APK y cargarlos en runtime mediante `DexClassLoader`.
+## ✅ Fase 8 — v0.4.0: Runtime Completo en Android NDK + ART/DEX
+- [x] **Port completo de `kyumist_engine` a Android NDK (`arm64-v8a` y `armeabi-v7a`)**:
+  - Abstracción de ventana y ciclo de vida Android (`ANativeWindow`, `APP_CMD_INIT_WINDOW`/`TERM_WINDOW`/`WINDOW_RESIZED`, `PlatformPaths::SetAndroidDataDir`, `android_sink` en `spdlog`).
+  - `VulkanRenderer` compatible con **Vulkan 1.1+** en Android mediante `VK_KHR_android_surface` y `VkRenderPass`/`VkFramebuffer` clásicos + `VMA` carga dinámica + `SuspendSurface`/`ResumeSurface`.
+  - Integración completa de `ImGui` (`imgui_impl_android`), `RmlUi` + `FreeType`, `miniaudio` (AAudio / OpenSL|ES) y `TouchControlsOverlay` con **soporte multi-touch real** (joystick izquierdo + botones A/B simultáneos).
+- [x] **Scripting Java nativo sobre Android ART / DEX**:
+  - `ScriptHost.reloadDexClassLoader(...)` con `dalvik.system.InMemoryDexClassLoader` (Android API 26+) y empaquetado de `java-api` en la plantilla Android.
+  - Registro JNI directo mediante `KymEngineActivity.nativeSetAndroidContext(...)` en `ScriptEngine::SetAndroidJvm`.
+  - Compilación automática de `scripts/*.java` a `assets/scripts.dex` (`javac` + `d8`/`d8.jar`/`dx`) durante la exportación APK en `ProjectManager`, con `zipalign` + firma v2/v3 (`apksigner`).
 
 ---
 

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <vector>
 
 namespace Kyumist {
 
@@ -14,8 +15,26 @@ namespace {
 
 TouchControlsConfig s_Config;
 bool s_StickDragging = false;
+std::vector<TouchControlsOverlay::TouchPoint> s_TouchPoints;
+bool s_MultiTouchMode = false;
+int32_t s_StickPointerId = -1;
 
 } // namespace
+
+void TouchControlsOverlay::SetTouchPoints(const TouchPoint* points, size_t count) {
+    s_TouchPoints.clear();
+    if (points && count > 0) {
+        s_TouchPoints.assign(points, points + count);
+    }
+    s_MultiTouchMode = true;
+}
+
+void TouchControlsOverlay::ClearTouchPoints() {
+    s_TouchPoints.clear();
+    s_MultiTouchMode = false;
+    s_StickPointerId = -1;
+    s_StickDragging = false;
+}
 
 TouchControlsConfig& TouchControlsOverlay::GetConfig() {
     return s_Config;
@@ -106,15 +125,15 @@ void TouchControlsOverlay::RenderAndProcess(
     ImVec2 viewportSize,
     bool allowInput
 ) {
-    if (!drawList || viewportSize.x <= 80.0f || viewportSize.y <= 80.0f) {
+    if (viewportSize.x <= 80.0f || viewportSize.y <= 80.0f) {
         return;
     }
 
     const float minDim = std::min(viewportSize.x, viewportSize.y);
-    const float stickRadius = std::clamp(minDim * 0.105f, 44.0f, 84.0f);
+    const float stickRadius = std::clamp(minDim * 0.115f, 44.0f, 130.0f);
     const float knobRadius = stickRadius * 0.42f;
-    const float btnRadius = std::clamp(minDim * 0.068f, 28.0f, 54.0f);
-    const float margin = stickRadius + 28.0f;
+    const float btnRadius = std::clamp(minDim * 0.075f, 28.0f, 82.0f);
+    const float margin = stickRadius + std::clamp(minDim * 0.04f, 24.0f, 52.0f);
 
     const ImVec2 stickCenter(
         viewportMin.x + margin,
@@ -129,38 +148,111 @@ void TouchControlsOverlay::RenderAndProcess(
         btnACenter.y - btnRadius * 0.75f
     );
 
-    const ImGuiIO& io = ImGui::GetIO();
-    const ImVec2 mouse = io.MousePos;
-    const bool mouseDown = allowInput && ImGui::IsMouseDown(ImGuiMouseButton_Left);
-    const bool mouseClicked = allowInput && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
-
     auto distSq = [](ImVec2 a, ImVec2 b) -> float {
         const float dx = a.x - b.x;
         const float dy = a.y - b.y;
         return dx * dx + dy * dy;
     };
 
-    if (!mouseDown) {
-        s_StickDragging = false;
-    } else if (mouseClicked && distSq(mouse, stickCenter) <= (stickRadius * 1.25f) * (stickRadius * 1.25f)) {
-        s_StickDragging = true;
-    }
-
     ImVec2 knobPos = stickCenter;
     float axisX = 0.0f;
     float axisY = 0.0f;
+    bool btnAPressed = false;
+    bool btnBPressed = false;
 
-    if (s_StickDragging) {
-        float dx = mouse.x - stickCenter.x;
-        float dy = mouse.y - stickCenter.y;
-        const float len = std::sqrt(dx * dx + dy * dy);
-        if (len > stickRadius && len > 0.0001f) {
-            dx = (dx / len) * stickRadius;
-            dy = (dy / len) * stickRadius;
+    if (s_MultiTouchMode) {
+        if (!allowInput) {
+            s_StickPointerId = -1;
+            s_StickDragging = false;
+        } else {
+            ImVec2 stickPos = stickCenter;
+            bool foundStick = false;
+            if (s_StickPointerId != -1) {
+                for (const auto& pt : s_TouchPoints) {
+                    if (pt.active && pt.pointerId == s_StickPointerId) {
+                        stickPos = ImVec2(pt.x, pt.y);
+                        foundStick = true;
+                        break;
+                    }
+                }
+                if (!foundStick) {
+                    s_StickPointerId = -1;
+                }
+            }
+
+            if (s_StickPointerId == -1) {
+                const float captureR = stickRadius * 1.35f;
+                const float captureR2 = captureR * captureR;
+                for (const auto& pt : s_TouchPoints) {
+                    if (!pt.active) {
+                        continue;
+                    }
+                    const ImVec2 ptPos(pt.x, pt.y);
+                    if (distSq(ptPos, stickCenter) <= captureR2) {
+                        s_StickPointerId = pt.pointerId;
+                        stickPos = ptPos;
+                        foundStick = true;
+                        break;
+                    }
+                }
+            }
+
+            s_StickDragging = foundStick;
+            if (s_StickDragging) {
+                float dx = stickPos.x - stickCenter.x;
+                float dy = stickPos.y - stickCenter.y;
+                const float len = std::sqrt(dx * dx + dy * dy);
+                if (len > stickRadius && len > 0.0001f) {
+                    dx = (dx / len) * stickRadius;
+                    dy = (dy / len) * stickRadius;
+                }
+                knobPos = ImVec2(stickCenter.x + dx, stickCenter.y + dy);
+                axisX = dx / stickRadius;
+                axisY = -dy / stickRadius;
+            }
+
+            const float btnHitR = btnRadius * 1.25f;
+            const float btnHitR2 = btnHitR * btnHitR;
+            for (const auto& pt : s_TouchPoints) {
+                if (!pt.active || pt.pointerId == s_StickPointerId) {
+                    continue;
+                }
+                const ImVec2 ptPos(pt.x, pt.y);
+                if (distSq(ptPos, btnACenter) <= btnHitR2) {
+                    btnAPressed = true;
+                }
+                if (distSq(ptPos, btnBCenter) <= btnHitR2) {
+                    btnBPressed = true;
+                }
+            }
         }
-        knobPos = ImVec2(stickCenter.x + dx, stickCenter.y + dy);
-        axisX = dx / stickRadius;
-        axisY = -dy / stickRadius; // up = +1
+    } else if (ImGui::GetCurrentContext() != nullptr) {
+        const ImGuiIO& io = ImGui::GetIO();
+        const ImVec2 mouse = io.MousePos;
+        const bool mouseDown = allowInput && ImGui::IsMouseDown(ImGuiMouseButton_Left);
+        const bool mouseClicked = allowInput && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+
+        if (!mouseDown) {
+            s_StickDragging = false;
+        } else if (mouseClicked && distSq(mouse, stickCenter) <= (stickRadius * 1.25f) * (stickRadius * 1.25f)) {
+            s_StickDragging = true;
+        }
+
+        if (s_StickDragging) {
+            float dx = mouse.x - stickCenter.x;
+            float dy = mouse.y - stickCenter.y;
+            const float len = std::sqrt(dx * dx + dy * dy);
+            if (len > stickRadius && len > 0.0001f) {
+                dx = (dx / len) * stickRadius;
+                dy = (dy / len) * stickRadius;
+            }
+            knobPos = ImVec2(stickCenter.x + dx, stickCenter.y + dy);
+            axisX = dx / stickRadius;
+            axisY = -dy / stickRadius; // up = +1
+        }
+
+        btnAPressed = mouseDown && !s_StickDragging && distSq(mouse, btnACenter) <= btnRadius * btnRadius;
+        btnBPressed = mouseDown && !s_StickDragging && distSq(mouse, btnBCenter) <= btnRadius * btnRadius;
     }
 
     InputMap::SetTouchAxis(axisX, axisY);
@@ -170,14 +262,15 @@ void TouchControlsOverlay::RenderAndProcess(
     InputMap::SetVirtualActionState("move_forward", axisY > kDeadzone);
     InputMap::SetVirtualActionState("move_back", axisY < -kDeadzone);
 
-    const bool btnAPressed = mouseDown && !s_StickDragging && distSq(mouse, btnACenter) <= btnRadius * btnRadius;
-    const bool btnBPressed = mouseDown && !s_StickDragging && distSq(mouse, btnBCenter) <= btnRadius * btnRadius;
-
     if (!s_Config.buttonAAction.empty()) {
         InputMap::SetVirtualActionState(s_Config.buttonAAction, btnAPressed);
     }
     if (!s_Config.buttonBAction.empty()) {
         InputMap::SetVirtualActionState(s_Config.buttonBAction, btnBPressed);
+    }
+
+    if (!drawList) {
+        return;
     }
 
     const int alphaBase = static_cast<int>(s_Config.opacity * 170.0f);

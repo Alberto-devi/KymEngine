@@ -2,6 +2,8 @@
 
 #include <imgui.h>
 
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <string>
 
@@ -19,9 +21,19 @@ struct TouchControlsConfig {
 
 class TouchControlsOverlay {
 public:
+    struct TouchPoint {
+        int32_t pointerId = -1;
+        float x = 0.0f;
+        float y = 0.0f;
+        bool active = false;
+    };
+
     static TouchControlsConfig& GetConfig();
     static bool LoadFromProject(const std::filesystem::path& projectDir);
     static bool SaveToProject(const std::filesystem::path& projectDir);
+
+    static void SetTouchPoints(const TouchPoint* points, size_t count);
+    static void ClearTouchPoints();
 
     static bool ShouldShow(bool isMobilePlatform);
     static void RenderAndProcess(

@@ -6,13 +6,14 @@
 
     <application
         android:allowBackup="true"
+        android:extractNativeLibs="true"
         android:label="KymEngine Game"
         android:hasCode="true">
         <activity
             android:name="dev.kyumist.android.KymEngineActivity"
             android:exported="true"
             android:screenOrientation="sensorLandscape"
-            android:configChanges="orientation|screenSize|keyboardHidden">
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden">
             <meta-data android:name="android.app.lib_name" android:value="kymengine_android" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

@@ -15,16 +15,55 @@ ANativeWindow* s_AndroidWin = nullptr;
 uint32_t s_AndroidW = 1280;
 uint32_t s_AndroidH = 720;
 bool s_AndroidClose = false;
+bool s_AndroidResized = false;
+std::function<void()> s_AndroidPump;
 } // namespace
 
 void Window::SetAndroidWindow(ANativeWindow* win, uint32_t w, uint32_t h) {
     s_AndroidWin = win;
     s_AndroidW = w > 0 ? w : 1280;
     s_AndroidH = h > 0 ? h : 720;
+    if (win != nullptr) {
+        s_AndroidClose = false;
+    }
+}
+
+void Window::SetAndroidEventPump(std::function<void()> pump) {
+    s_AndroidPump = std::move(pump);
+}
+
+void Window::MarkAndroidResized(uint32_t w, uint32_t h) {
+    if (w > 0) {
+        s_AndroidW = w;
+    }
+    if (h > 0) {
+        s_AndroidH = h;
+    }
+    s_AndroidResized = true;
 }
 
 void Window::RequestAndroidClose() {
     s_AndroidClose = true;
+}
+
+void Window::UpdateAndroidWindow(ANativeWindow* win) {
+    s_AndroidWin = win;
+    m_AndroidWindow = win;
+    if (win != nullptr) {
+        const int32_t w = ANativeWindow_getWidth(win);
+        const int32_t h = ANativeWindow_getHeight(win);
+        if (w > 0) {
+            s_AndroidW = static_cast<uint32_t>(w);
+            m_Data.width = s_AndroidW;
+        }
+        if (h > 0) {
+            s_AndroidH = static_cast<uint32_t>(h);
+            m_Data.height = s_AndroidH;
+        }
+        m_Data.framebufferResized = true;
+        s_AndroidResized = false;
+        s_AndroidClose = false;
+    }
 }
 
 Window::Window(const WindowProps& props) {
@@ -39,13 +78,31 @@ Window::~Window() {
 }
 
 void Window::PollEvents() {
-    if (s_AndroidWin) {
-        const uint32_t nw = static_cast<uint32_t>(ANativeWindow_getWidth(s_AndroidWin));
-        const uint32_t nh = static_cast<uint32_t>(ANativeWindow_getHeight(s_AndroidWin));
-        if (nw > 0 && nh > 0 && (nw != m_Data.width || nh != m_Data.height)) {
-            m_Data.width = nw;
-            m_Data.height = nh;
-            m_Data.framebufferResized = true;
+    if (s_AndroidPump) {
+        s_AndroidPump();
+    }
+    m_AndroidWindow = s_AndroidWin;
+    if (s_AndroidResized) {
+        if (s_AndroidW > 0 && s_AndroidH > 0) {
+            m_Data.width = s_AndroidW;
+            m_Data.height = s_AndroidH;
+        }
+        m_Data.framebufferResized = true;
+        s_AndroidResized = false;
+    }
+    if (m_AndroidWindow) {
+        const int32_t nwRaw = ANativeWindow_getWidth(m_AndroidWindow);
+        const int32_t nhRaw = ANativeWindow_getHeight(m_AndroidWindow);
+        if (nwRaw > 0 && nhRaw > 0) {
+            const uint32_t nw = static_cast<uint32_t>(nwRaw);
+            const uint32_t nh = static_cast<uint32_t>(nhRaw);
+            if (nw != m_Data.width || nh != m_Data.height) {
+                m_Data.width = nw;
+                m_Data.height = nh;
+                s_AndroidW = nw;
+                s_AndroidH = nh;
+                m_Data.framebufferResized = true;
+            }
         }
     }
 }

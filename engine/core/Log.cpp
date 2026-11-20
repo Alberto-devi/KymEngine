@@ -1,7 +1,11 @@
 #include "core/Log.hpp"
 
 #include <spdlog/sinks/base_sink.h>
+#ifdef __ANDROID__
+#include <spdlog/sinks/android_sink.h>
+#else
 #include <spdlog/sinks/stdout_color_sinks.h>
+#endif
 
 #include <deque>
 #include <mutex>
@@ -63,8 +67,13 @@ void Log::Init() {
         return;
     }
 
+#ifdef __ANDROID__
+    auto consoleOutSink = std::make_shared<spdlog::sinks::android_sink_mt>("KymEngine");
+    consoleOutSink->set_pattern("[%n] %v");
+#else
     auto consoleOutSink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
     consoleOutSink->set_pattern("%^[%T] [%n] [%l]: %v%$");
+#endif
 
     s_ConsoleSink = std::make_shared<EditorConsoleSink>();
     s_ConsoleSink->set_pattern("[%T] %v");

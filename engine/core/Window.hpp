@@ -7,6 +7,7 @@ struct ANativeWindow;
 struct GLFWwindow;
 #endif
 #include <cstdint>
+#include <functional>
 #include <string>
 
 namespace Kyumist {
@@ -36,7 +37,10 @@ public:
     GLFWwindow* GetNativeWindow() const { return m_Window; }
 #ifdef __ANDROID__
     ANativeWindow* GetAndroidWindow() const { return m_AndroidWindow; }
+    void UpdateAndroidWindow(ANativeWindow* win);
     static void SetAndroidWindow(ANativeWindow* win, uint32_t w, uint32_t h);
+    static void SetAndroidEventPump(std::function<void()> pump);
+    static void MarkAndroidResized(uint32_t w, uint32_t h);
     static void RequestAndroidClose();
 #endif
 

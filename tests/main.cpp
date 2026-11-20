@@ -12,6 +12,7 @@
 #include "ui/TouchControlsOverlay.hpp"
 #include "ui/UISystem.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdlib>
@@ -470,6 +471,64 @@ void TestInputMapAndTouchControls() {
     std::cout << "[PASS] TestInputMapAndTouchControls\n";
 }
 
+void TestTouchControlsMultiTouch() {
+    Kyumist::InputMap::InitDefaults();
+    Kyumist::InputMap::ClearVirtualStates();
+
+    auto& cfg = Kyumist::TouchControlsOverlay::GetConfig();
+    cfg.enabledOnMobile = true;
+    cfg.buttonAAction = "jump";
+    cfg.buttonBAction = "attack";
+
+    const float viewW = 1920.0f;
+    const float viewH = 1080.0f;
+    const float minDim = std::min(viewW, viewH);
+    const float stickRadius = std::clamp(minDim * 0.115f, 44.0f, 130.0f);
+    const float btnRadius = std::clamp(minDim * 0.075f, 28.0f, 82.0f);
+    const float margin = stickRadius + std::clamp(minDim * 0.04f, 24.0f, 52.0f);
+
+    const ImVec2 stickCenter(margin, viewH - margin);
+    const ImVec2 btnACenter(viewW - margin + 10.0f, viewH - margin + 12.0f);
+    const ImVec2 btnBCenter(btnACenter.x - btnRadius * 2.25f, btnACenter.y - btnRadius * 0.75f);
+
+    // Frame 1: Left thumb moves stick right+up while right thumb simultaneously presses Button A ("jump")
+    const std::array<Kyumist::TouchControlsOverlay::TouchPoint, 2> frame1Points{{
+        {0, stickCenter.x + stickRadius * 0.75f, stickCenter.y - stickRadius * 0.50f, true},
+        {1, btnACenter.x, btnACenter.y, true}
+    }};
+    Kyumist::TouchControlsOverlay::SetTouchPoints(frame1Points.data(), frame1Points.size());
+    Kyumist::TouchControlsOverlay::RenderAndProcess(nullptr, ImVec2(0.0f, 0.0f), ImVec2(viewW, viewH), true);
+    Kyumist::InputMap::Update(nullptr);
+
+    Require(Kyumist::InputMap::GetTouchAxisX() > 0.45f, "Multi-touch stick should report positive X axis");
+    Require(Kyumist::InputMap::GetTouchAxisY() > 0.30f, "Multi-touch stick should report positive Y axis");
+    Require(Kyumist::InputMap::IsActionPressed("move_right"), "Multi-touch stick should activate move_right");
+    Require(Kyumist::InputMap::IsActionPressed("move_forward"), "Multi-touch stick should activate move_forward");
+    Require(Kyumist::InputMap::IsActionPressed("jump"), "Multi-touch should simultaneously press button A (jump)");
+    Require(!Kyumist::InputMap::IsActionPressed("attack"), "Button B (attack) should not be pressed in frame 1");
+
+    // Frame 2: Release stick, press both A and B
+    const std::array<Kyumist::TouchControlsOverlay::TouchPoint, 2> frame2Points{{
+        {1, btnACenter.x, btnACenter.y, true},
+        {2, btnBCenter.x, btnBCenter.y, true}
+    }};
+    Kyumist::TouchControlsOverlay::SetTouchPoints(frame2Points.data(), frame2Points.size());
+    Kyumist::TouchControlsOverlay::RenderAndProcess(nullptr, ImVec2(0.0f, 0.0f), ImVec2(viewW, viewH), true);
+    Kyumist::InputMap::Update(nullptr);
+
+    Require(std::abs(Kyumist::InputMap::GetTouchAxisX()) < 0.001f, "Released stick should reset X axis");
+    Require(std::abs(Kyumist::InputMap::GetTouchAxisY()) < 0.001f, "Released stick should reset Y axis");
+    Require(Kyumist::InputMap::IsActionPressed("jump"), "Button A should stay pressed");
+    Require(Kyumist::InputMap::IsActionPressed("attack"), "Button B should be simultaneously pressed");
+
+    // Cleanup
+    Kyumist::TouchControlsOverlay::ClearTouchPoints();
+    Kyumist::InputMap::ClearVirtualStates();
+    Kyumist::InputMap::Update(nullptr);
+    Require(!Kyumist::InputMap::IsActionPressed("jump"), "ClearVirtualStates should release jump");
+    std::cout << "[PASS] TestTouchControlsMultiTouch\n";
+}
+
 void TestRmlUiHtmlCssDocument() {
     const std::filesystem::path tmpDir = std::filesystem::temp_directory_path() / "kyumist_test_rmlui";
     std::error_code ec;
@@ -508,6 +567,7 @@ int main() {
     TestInMemoryUndoRedoSerialization();
     TestKinematicCollisionResolution();
     TestInputMapAndTouchControls();
+    TestTouchControlsMultiTouch();
     TestRmlUiHtmlCssDocument();
 
     if (g_Failures > 0) {

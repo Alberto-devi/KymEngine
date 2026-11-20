@@ -151,11 +151,26 @@ jobs:
             KymEngine-*-win64-setup.exe
 
   build-android:
-    name: Build Android Template (arm64-v8a)
+    name: Build Android Template (arm64-v8a + armeabi-v7a)
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Install Android build tools (glslang)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y glslang-tools
+
+      - name: Compile shaders & stage engine assets into Android APK
+        run: |
+          glslangValidator -V assets/shaders/triangle.vert -o assets/shaders/triangle.vert.spv
+          glslangValidator -V assets/shaders/triangle.frag -o assets/shaders/triangle.frag.spv
+          glslangValidator -V assets/shaders/scene.vert -o assets/shaders/scene.vert.spv
+          glslangValidator -V assets/shaders/scene.frag -o assets/shaders/scene.frag.spv
+          mkdir -p packaging/android/app/src/main/assets/shaders packaging/android/app/src/main/assets/fonts
+          cp assets/shaders/*.spv packaging/android/app/src/main/assets/shaders/
+          cp assets/fonts/*.ttf packaging/android/app/src/main/assets/fonts/
 
       - name: Setup OpenJDK 17
         uses: actions/setup-java@v4
@@ -176,15 +191,22 @@ jobs:
       - name: Build Android Template APK
         working-directory: packaging/android
         run: |
+          TAG_VER="${GITHUB_REF_NAME#v}"
+          if [[ -z "$TAG_VER" || "$TAG_VER" == "main" ]]; then TAG_VER="0.4.0"; fi
           rm -rf .gradle
-          gradle assembleRelease --no-daemon --stacktrace
+          gradle assembleRelease --no-daemon --stacktrace "-PKYMENGINE_VERSION=$TAG_VER"
           cp app/build/outputs/apk/release/app-release-unsigned.apk ../../KymEngine-android-template.apk
+          if [[ -f "$ANDROID_HOME/build-tools/34.0.0/lib/d8.jar" ]]; then
+            cp "$ANDROID_HOME/build-tools/34.0.0/lib/d8.jar" ../../KymEngine-android-d8.jar
+          fi
 
       - name: Upload Android template artifact
         uses: actions/upload-artifact@v4
         with:
           name: android-template
-          path: KymEngine-android-template.apk
+          path: |
+            KymEngine-android-template.apk
+            KymEngine-android-d8.jar
 
   release:
     name: Publish GitHub Release

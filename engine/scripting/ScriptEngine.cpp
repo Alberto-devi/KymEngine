@@ -47,6 +47,13 @@ struct ScriptEngineState {
     jmethodID destroyInstanceMethod = nullptr;
     jmethodID destroyAllMethod = nullptr;
     std::string pendingSceneLoad;
+#ifdef __ANDROID__
+    JavaVM* androidJvm = nullptr;
+    jclass androidBridgeClass = nullptr;
+    jclass androidScriptHostClass = nullptr;
+    bool attachedCurrentThread = false;
+    bool nativesRegistered = false;
+#endif
 };
 
 ScriptEngineState s_State;
@@ -617,10 +624,20 @@ jboolean JNICALL Native_IsAnimationPlaying(JNIEnv* /*env*/, jclass /*cls*/, jlon
 }
 
 bool RegisterNativeBridge(JNIEnv* env) {
+#ifdef __ANDROID__
+    jclass bridgeClass = s_State.androidBridgeClass
+        ? static_cast<jclass>(env->NewLocalRef(s_State.androidBridgeClass))
+        : nullptr;
+    if (!bridgeClass) {
+        KM_CORE_ERROR("Android NativeBridge global class reference is null.");
+        return false;
+    }
+#else
     jclass bridgeClass = env->FindClass("dev/kyumist/NativeBridge");
     if (!bridgeClass || CheckAndClearException(env, "FindClass(NativeBridge)")) {
         return false;
     }
+#endif
 
     auto makeMethod = [](const char* name, const char* sig, void* fn) {
         return JNINativeMethod{const_cast<char*>(name), const_cast<char*>(sig), fn};
@@ -683,12 +700,70 @@ bool RegisterNativeBridge(JNIEnv* env) {
 
 } // namespace
 
+#ifdef __ANDROID__
+void ScriptEngine::SetAndroidJvm(JavaVM* jvm, jclass nativeBridgeClassGlobalRef, jclass scriptHostClassGlobalRef) {
+    JNIEnv* existingEnv = nullptr;
+    if (s_State.androidJvm &&
+        s_State.androidJvm->GetEnv(reinterpret_cast<void**>(&existingEnv), JNI_VERSION_1_6) == JNI_OK &&
+        existingEnv) {
+        if (s_State.androidBridgeClass) {
+            existingEnv->DeleteGlobalRef(s_State.androidBridgeClass);
+            s_State.androidBridgeClass = nullptr;
+        }
+        if (s_State.androidScriptHostClass) {
+            existingEnv->DeleteGlobalRef(s_State.androidScriptHostClass);
+            s_State.androidScriptHostClass = nullptr;
+        }
+    }
+    s_State.androidJvm = jvm;
+    s_State.androidBridgeClass = nativeBridgeClassGlobalRef;
+    s_State.androidScriptHostClass = scriptHostClassGlobalRef;
+    s_State.nativesRegistered = false;
+}
+#endif
+
 void ScriptEngine::Init(Window* window) {
     if (s_State.jvm) {
         return;
     }
     s_State.window = window;
 
+#ifdef __ANDROID__
+    if (!s_State.androidJvm || !s_State.androidBridgeClass || !s_State.androidScriptHostClass) {
+        KM_CORE_ERROR("Android ART JVM or class refs not set via SetAndroidJvm(). Java scripting disabled.");
+        return;
+    }
+
+    JNIEnv* env = nullptr;
+    const jint getEnvRes = s_State.androidJvm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
+    if (getEnvRes == JNI_EDETACHED) {
+        if (s_State.androidJvm->AttachCurrentThread(&env, nullptr) != JNI_OK || !env) {
+            KM_CORE_ERROR("Failed to attach native thread to Android ART JVM.");
+            return;
+        }
+        s_State.attachedCurrentThread = true;
+    } else if (getEnvRes != JNI_OK || !env) {
+        KM_CORE_ERROR("Failed to acquire JNIEnv from Android ART JVM (error {}).", getEnvRes);
+        return;
+    }
+
+    s_State.jvm = s_State.androidJvm;
+    s_State.env = env;
+
+    if (!s_State.nativesRegistered) {
+        if (!RegisterNativeBridge(s_State.env)) {
+            KM_CORE_ERROR("Failed to register JNI native methods for dev.kyumist.NativeBridge on Android.");
+            Shutdown();
+            return;
+        }
+        s_State.nativesRegistered = true;
+    }
+
+    s_State.scriptHostClass = s_State.androidScriptHostClass;
+
+    s_State.reloadClassLoaderMethod = s_State.env->GetStaticMethodID(
+        s_State.scriptHostClass, "reloadDexClassLoader", "(Ljava/lang/String;)Z");
+#else
     const std::filesystem::path jarPath = ResolveJavaApiJar();
     if (!std::filesystem::exists(jarPath)) {
         KM_CORE_ERROR("kyumist-api.jar not found at '{}'. Java scripting disabled.", jarPath.string());
@@ -745,6 +820,7 @@ void ScriptEngine::Init(Window* window) {
 
     s_State.reloadClassLoaderMethod = s_State.env->GetStaticMethodID(
         s_State.scriptHostClass, "reloadClassLoader", "(Ljava/lang/String;)Z");
+#endif
     s_State.createInstanceMethod = s_State.env->GetStaticMethodID(
         s_State.scriptHostClass, "createInstance", "(JLjava/lang/String;)Z");
     s_State.updateInstanceMethod = s_State.env->GetStaticMethodID(
@@ -784,18 +860,32 @@ void ScriptEngine::Shutdown() {
             s_State.env->CallStaticVoidMethod(s_State.scriptHostClass, s_State.destroyAllMethod);
             CheckAndClearException(s_State.env, "ScriptHost.destroyAll");
         }
+#ifndef __ANDROID__
         if (s_State.scriptHostClass) {
             s_State.env->DeleteGlobalRef(s_State.scriptHostClass);
-            s_State.scriptHostClass = nullptr;
         }
+#endif
+        s_State.scriptHostClass = nullptr;
     }
 
+#ifdef __ANDROID__
+    if (s_State.attachedCurrentThread && s_State.androidJvm) {
+        s_State.androidJvm->DetachCurrentThread();
+        s_State.attachedCurrentThread = false;
+    }
+    s_State.jvm = nullptr;
+    s_State.env = nullptr;
+    s_State.activeScene = nullptr;
+    s_State.window = nullptr;
+    KM_CORE_INFO("Android ART ScriptEngine detached cleanly.");
+#else
     s_State.jvm->DestroyJavaVM();
     s_State.jvm = nullptr;
     s_State.env = nullptr;
     s_State.activeScene = nullptr;
     s_State.window = nullptr;
     KM_CORE_INFO("Embedded JVM shut down cleanly.");
+#endif
 }
 
 bool ScriptEngine::IsInitialized() {
@@ -831,6 +921,54 @@ bool ScriptEngine::CompileAndReloadScripts(Scene* scene, bool isRuntimeActive) {
         OnRuntimeStop(scene);
     }
 
+#ifdef __ANDROID__
+    std::error_code ec;
+    std::filesystem::path dexPath;
+    const std::filesystem::path candidates[] = {
+        ProjectManager::HasActiveProject() ? (ProjectManager::GetActiveProjectDir() / "scripts.dex") : std::filesystem::path(),
+        ResolveScriptsSourceDir() / "scripts.dex",
+        PlatformPaths::ResolveAssetsDir() / "scripts.dex"
+    };
+    for (const auto& c : candidates) {
+        if (!c.empty() && std::filesystem::exists(c, ec)) {
+            dexPath = c;
+            break;
+        }
+    }
+    if (dexPath.empty()) {
+        s_State.lastCompileOutput = "No se encontro scripts.dex (escena sin scripts DEX).";
+        s_State.lastCompileSuccess = true;
+        KM_CORE_INFO("No Android scripts.dex found; skipping DEX script load.");
+        if (isRuntimeActive && scene) {
+            OnRuntimeStart(scene);
+        }
+        return true;
+    }
+
+    const std::string dexUtf8 = PlatformPaths::PathToUtf8(dexPath);
+    jstring jDexPath = s_State.env->NewStringUTF(dexUtf8.c_str());
+    const jboolean loaded = s_State.env->CallStaticBooleanMethod(
+        s_State.scriptHostClass,
+        s_State.reloadClassLoaderMethod,
+        jDexPath
+    );
+    s_State.env->DeleteLocalRef(jDexPath);
+    if (CheckAndClearException(s_State.env, "ScriptHost.reloadDexClassLoader") || loaded == JNI_FALSE) {
+        s_State.lastCompileOutput = "Error cargando scripts.dex en Android ART.";
+        s_State.lastCompileSuccess = false;
+        KM_CORE_ERROR("Failed to load Android DEX scripts from '{}'.", dexUtf8);
+        return false;
+    }
+
+    s_State.lastCompileOutput = "Scripts DEX cargados desde " + dexUtf8;
+    s_State.lastCompileSuccess = true;
+    KM_CORE_INFO("Loaded Android DEX scripts from '{}'.", dexUtf8);
+
+    if (isRuntimeActive && scene) {
+        OnRuntimeStart(scene);
+    }
+    return true;
+#else
     const std::filesystem::path scriptsDir = ResolveScriptsSourceDir();
     const std::filesystem::path buildDir = ResolveScriptsBuildDir();
     const std::filesystem::path jarPath = ResolveJavaApiJar();
@@ -918,6 +1056,7 @@ bool ScriptEngine::CompileAndReloadScripts(Scene* scene, bool isRuntimeActive) {
     }
 
     return true;
+#endif
 }
 
 void ScriptEngine::OnRuntimeStart(Scene* scene) {

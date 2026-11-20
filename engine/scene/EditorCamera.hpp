@@ -2,7 +2,11 @@
 
 #include "core/Timestep.hpp"
 
+#ifndef __ANDROID__
 #include <GLFW/glfw3.h>
+#else
+struct GLFWwindow;
+#endif
 #include <glm/glm.hpp>
 
 namespace Kyumist {

@@ -3,6 +3,9 @@
 #include "core/Timestep.hpp"
 
 #include <entt/entt.hpp>
+#ifdef __ANDROID__
+#include <jni.h>
+#endif
 
 #include <filesystem>
 #include <string>
@@ -15,6 +18,9 @@ class Window;
 
 class ScriptEngine {
 public:
+#ifdef __ANDROID__
+    static void SetAndroidJvm(JavaVM* jvm, jclass nativeBridgeClassGlobalRef, jclass scriptHostClassGlobalRef);
+#endif
     static void Init(Window* window);
     static void Shutdown();
 

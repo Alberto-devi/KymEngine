@@ -1,7 +1,9 @@
 package dev.kyumist;
 
+import java.io.Closeable;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -9,18 +11,25 @@ import java.util.HashMap;
 import java.util.Map;
 
 public final class ScriptHost {
-    private static URLClassLoader classLoader;
+    private static ClassLoader classLoader;
     private static final Map<Long, KyumistScript> instances = new HashMap<>();
 
     private ScriptHost() {}
 
+    private static void closeCurrentClassLoader() {
+        if (classLoader instanceof Closeable) {
+            try {
+                ((Closeable) classLoader).close();
+            } catch (Throwable ignored) {
+            }
+        }
+        classLoader = null;
+    }
+
     public static boolean reloadClassLoader(String classesDirPath) {
         destroyAll();
         try {
-            if (classLoader != null) {
-                classLoader.close();
-                classLoader = null;
-            }
+            closeCurrentClassLoader();
             Path dir = Paths.get(classesDirPath);
             if (!Files.exists(dir)) {
                 NativeBridge.logWarn("Scripts build directory does not exist: " + classesDirPath);
@@ -35,6 +44,33 @@ public final class ScriptHost {
         }
     }
 
+    public static boolean reloadDexClassLoader(String dexFilePath) {
+        destroyAll();
+        try {
+            closeCurrentClassLoader();
+            if (dexFilePath == null || dexFilePath.isEmpty()) {
+                NativeBridge.logWarn("Empty DEX path provided to reloadDexClassLoader.");
+                return false;
+            }
+            Path dexPath = Paths.get(dexFilePath);
+            if (!Files.exists(dexPath)) {
+                NativeBridge.logWarn("Scripts DEX file does not exist: " + dexFilePath);
+                return false;
+            }
+            byte[] bytes = Files.readAllBytes(dexPath);
+            ByteBuffer buffer = ByteBuffer.wrap(bytes);
+            Class<?> dexLoaderCls = Class.forName("dalvik.system.InMemoryDexClassLoader");
+            classLoader = (ClassLoader) dexLoaderCls
+                    .getConstructor(ByteBuffer.class, ClassLoader.class)
+                    .newInstance(buffer, ScriptHost.class.getClassLoader());
+            NativeBridge.logInfo("Loaded Android DEX scripts via InMemoryDexClassLoader (" + bytes.length + " bytes).");
+            return true;
+        } catch (Throwable t) {
+            NativeBridge.logError("Failed to reload Android DEX ClassLoader: " + t.getMessage());
+            return false;
+        }
+    }
+
     public static boolean createInstance(long entityId, String className) {
         if (classLoader == null || className == null || className.isEmpty()) {
             return false;
@@ -42,10 +78,11 @@ public final class ScriptHost {
         try {
             Class<?> clazz = Class.forName(className, true, classLoader);
             Object obj = clazz.getDeclaredConstructor().newInstance();
-            if (!(obj instanceof KyumistScript script)) {
+            if (!(obj instanceof KyumistScript)) {
                 NativeBridge.logError("Class '" + className + "' does not extend dev.kyumist.KyumistScript");
                 return false;
             }
+            KyumistScript script = (KyumistScript) obj;
             script.internalAttach(entityId);
             instances.put(entityId, script);
             script.onCreate();

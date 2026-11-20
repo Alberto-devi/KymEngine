@@ -56,6 +56,13 @@ glm::mat4 EditorCamera::GetViewProjection(float aspectRatio) const {
 }
 
 void EditorCamera::OnUpdate(Timestep ts, GLFWwindow* window, bool viewportHovered, float scrollDelta) {
+#ifdef __ANDROID__
+    (void)ts;
+    (void)window;
+    (void)viewportHovered;
+    (void)scrollDelta;
+    return;
+#else
     if (!window) {
         return;
     }
@@ -117,6 +124,7 @@ void EditorCamera::OnUpdate(Timestep ts, GLFWwindow* window, bool viewportHovere
     if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) m_Position -= right * speed;
     if (glfwGetKey(window, GLFW_KEY_E) == GLFW_PRESS) m_Position += worldUp * speed;
     if (glfwGetKey(window, GLFW_KEY_Q) == GLFW_PRESS) m_Position -= worldUp * speed;
+#endif
 }
 
 } // namespace Kyumist

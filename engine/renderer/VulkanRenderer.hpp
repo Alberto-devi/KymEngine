@@ -10,10 +10,24 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
+#ifdef __ANDROID__
+struct ANativeWindow;
+#endif
+
 namespace Kyumist {
+
+template <typename T>
+inline uint64_t VkDescriptorSetToU64(T ds) {
+    if constexpr (std::is_pointer_v<T>) {
+        return reinterpret_cast<uint64_t>(ds);
+    } else {
+        return static_cast<uint64_t>(ds);
+    }
+}
 
 class Scene;
 class Window;
@@ -69,6 +83,12 @@ public:
     uint64_t CreateUITextureRGBA(uint32_t width, uint32_t height, const uint8_t* rgbaPixels);
     uint64_t LoadUITextureFile(const std::string& path, uint32_t& outWidth, uint32_t& outHeight);
     void DestroyUITexture(uint64_t handle);
+
+#ifdef __ANDROID__
+    void SuspendSurface();
+    void ResumeSurface(ANativeWindow* newWindow);
+    bool IsSurfaceSuspended() const { return m_SurfaceSuspended; }
+#endif
 
 private:
     struct GpuMesh {
@@ -138,18 +158,29 @@ private:
     void InitImGui();
     void ShutdownImGui();
 
+#ifdef __ANDROID__
+    void CreateSceneRenderPass();
+    void CreateImGuiRenderPass();
+    void CreateSceneFramebuffer();
+    void DestroySceneFramebuffer();
+    void CreateSwapchainFramebuffers();
+    void DestroySwapchainFramebuffers();
+#endif
+
     void RecordScenePass(VkCommandBuffer cmd);
     void RecordImGuiPass(
         VkCommandBuffer cmd,
         VkImage targetImage,
         VkImageView targetView,
-        VkImageLayout finalLayout
+        VkImageLayout finalLayout,
+        uint32_t swapchainImageIndex = 0
     );
     void RecordCommandBuffer(
         VkCommandBuffer cmd,
         VkImage targetImage,
         VkImageView targetView,
-        VkImageLayout finalLayout
+        VkImageLayout finalLayout,
+        uint32_t swapchainImageIndex = 0
     );
 
     Window* m_Window = nullptr;
@@ -214,6 +245,14 @@ private:
 
     VkDescriptorPool m_ImGuiDescriptorPool = VK_NULL_HANDLE;
     bool m_ImGuiInitialized = false;
+
+#ifdef __ANDROID__
+    VkRenderPass m_SceneRenderPass = VK_NULL_HANDLE;
+    VkFramebuffer m_SceneFramebuffer = VK_NULL_HANDLE;
+    VkRenderPass m_ImGuiRenderPass = VK_NULL_HANDLE;
+    std::vector<VkFramebuffer> m_SwapchainFramebuffers;
+    bool m_SurfaceSuspended = false;
+#endif
 
     std::array<FrameData, MAX_FRAMES_IN_FLIGHT> m_Frames{};
     uint32_t m_CurrentFrame = 0;

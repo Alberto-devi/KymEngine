@@ -1,6 +1,7 @@
 #include "core/Application.hpp"
 #include "core/Log.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <glm/glm.hpp>
 #include <vulkan/vulkan.h>
@@ -13,7 +14,10 @@ Application::Application(const ApplicationSpecification& spec)
     KM_CORE_INFO("Initializing {}...", m_Spec.name);
 
     uint32_t apiVersion = VK_API_VERSION_1_0;
-    if (vkEnumerateInstanceVersion(&apiVersion) == VK_SUCCESS) {
+    auto enumInstVerFn = reinterpret_cast<PFN_vkEnumerateInstanceVersion>(
+        vkGetInstanceProcAddr(VK_NULL_HANDLE, "vkEnumerateInstanceVersion")
+    );
+    if (enumInstVerFn && enumInstVerFn(&apiVersion) == VK_SUCCESS) {
         KM_CORE_INFO(
             "Vulkan Instance Version available: {}.{}.{}",
             VK_API_VERSION_MAJOR(apiVersion),
@@ -21,7 +25,7 @@ Application::Application(const ApplicationSpecification& spec)
             VK_API_VERSION_PATCH(apiVersion)
         );
     } else {
-        KM_CORE_WARN("Failed to query Vulkan instance version.");
+        KM_CORE_INFO("Vulkan Instance Version: 1.0 (vkEnumerateInstanceVersion unavailable).");
     }
 
     KM_CORE_TRACE("GLM active (sizeof(glm::mat4) = {} bytes).", sizeof(glm::mat4));
@@ -63,12 +67,19 @@ void Application::Run() {
             if (m_Window->ShouldClose()) {
                 break;
             }
+            if (m_Renderer && m_Renderer->IsSurfaceSuspended()) {
+                lastTime = std::chrono::steady_clock::now();
+                continue;
+            }
 #endif
         }
 
         const auto now = std::chrono::steady_clock::now();
-        const float deltaSeconds = std::chrono::duration<float>(now - lastTime).count();
+        float deltaSeconds = std::chrono::duration<float>(now - lastTime).count();
         lastTime = now;
+#ifdef __ANDROID__
+        deltaSeconds = std::clamp(deltaSeconds, 0.0001f, 0.1f);
+#endif
 
         OnUpdate(Timestep(deltaSeconds));
         m_Renderer->BeginImGuiFrame();

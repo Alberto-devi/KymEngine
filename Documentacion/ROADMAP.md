@@ -93,18 +93,26 @@ Este documento resume lo que ya está implementado y verificado en **Kyumist Eng
 
 ---
 
-## 🔜 Siguiente Paso Prioritario — Exportación de Proyectos e Instaladores de la App
-- [ ] **Sistema Completo de Exportación de Proyectos (Editor / CLI)**: asistente visual de exportación para generar compilaciones autocontenidas del juego con JRE embebido (`jlink`), *assets* empaquetados y ejecutables listos para distribuir sin depender de herramientas de desarrollo instaladas.
-- [ ] **Instalador para Windows**: empaquetado mediante **CPack / NSIS** o **Inno Setup** (instalador `.exe` / `.msi` con accesos directos, asociaciones `.kmproj` y librerías `jvm.dll` / Vulkan runtime embebidas) tanto para el Editor (`Kyumist Engine`) como para juegos exportados.
-- [ ] **Paquete e Instalador para Debian / Ubuntu (`.deb`)**: generación automática de paquetes `.deb` (mediante `CPack DEB` / `dpkg-deb`) con fichero `.desktop`, icono, dependencias (`libvulkan1`, OpenJDK) e instalación estándar en `/usr` u `/opt`.
-- [ ] **Distribución Universal para el resto de Linux (Flatpak / AppImage)**:
-  - Manifiesto de **Flatpak** (`org.kyumist.Engine.yml` / `.flatpak`) con *runtime* Freedesktop + extensión OpenJDK + acceso Vulkan, o
-  - Generación de **AppImage** portable (`linuxdeploy` / `appimagetool`) ejecutable directamente en cualquier distro Linux (Fedora, Arch, openSUSE, Ubuntu, etc.).
+## Fase 7 — v0.3.0: Input Map, UI HTML/CSS, Animación Esquelética glTF 2.0 y Exportación
+- [x] **Sistema de `InputMap` (`input_map.json`)**: acciones configurables desde el editor y consultables en Java (`Input.isActionPressed`, `isActionJustPressed`, `isActionJustReleased`, `getAxis`).
+- [x] **UI HTML/CSS con RmlUi**: carga de documentos `.html` + `.css` (`UI.loadDocument`, `setText`, `setVisible`, `setClass`) con eventos `onUIEvent(elementId, eventType)` en `KyumistScript`.
+- [x] **Animación Esquelética glTF 2.0 (*Skinning*)**: parseo de `nodes`, `skins` (`JOINTS_0`, `WEIGHTS_0`, `inverseBindMatrices`), `animations` (`LINEAR`, `STEP`, `CUBICSPLINE`) y mallas emparentadas a huesos (`attachedNode`), componente `AnimatorComponent`, *vertex buffers* dinámicos por entidad en Vulkan y API Java (`Entity.playAnimation`, `stopAnimation`, `setAnimationSpeed`, `isAnimationPlaying`).
+- [x] **Gestión de Escenas y Prefabs en Runtime**: `loadScene(...)` y `spawnPrefab(...)` con instanciación y activación inmediata de `JavaScriptComponent`.
+- [x] **Controles Táctiles para Móvil (`TouchControlsOverlay`)**: joystick virtual + botones A/B configurables en `project.kmproj` (con modo `simulateInEditor` para probar en PC).
+- [x] **Exportación Multiplataforma y Empaquetado**:
+  - Paquetes `.deb`, **AppImage** (`packaging/build_appimage.sh`) e instaladores/bundles para **Linux x64** y **Windows x64**.
+  - Exportación a **Android APK** (`packaging/android/`) con plantilla `NativeActivity`, inyección de `assets/` y firma automática con `zipalign` + `apksigner` (esquemas v2/v3).
+
+---
+
+## 🔜 Siguiente Paso Prioritario (v0.4.0) — Runtime Completo en Android NDK
+- [ ] **Portar `kyumist_engine` a Android NDK**: reemplazar GLFW por `ANativeWindow` / `AInputEvent` y `VK_KHR_android_surface` en `Window` y `VulkanRenderer`, compilando las dependencias nativas (`VMA`, `RmlUi`, `Freetype`, `miniaudio`, `ImGui`) para `arm64-v8a` y `armeabi-v7a`.
+- [ ] **Scripting Java sobre Android ART/DEX**: compilar los scripts `.java` del juego a `.dex` durante la exportación APK y cargarlos en runtime mediante `DexClassLoader`.
 
 ---
 
 ## Posibles Ampliaciones Futuras (Opcionales)
 - [ ] Reemplazar el solver físico integrado por **Jolt Physics** (3D complejo/mallas) y **Box2D v3** (2D avanzado) si se requieren articulaciones o *raycasts* masivos.
 - [ ] Integrar **Tracy Profiler** para instrumentación de frames CPU/GPU y empaquetado de distribución final con `jlink`.
-- [ ] Añadir *Shadow Maps* en profundidad para sombras entre objetos 3D arbitrarios, mapas normales/metálicos por textura y animaciones esqueléticas (*skinning*) de glTF 2.0.
+- [ ] Añadir *Shadow Maps* en profundidad para sombras entre objetos 3D arbitrarios y mapas normales/metálicos por textura.
 

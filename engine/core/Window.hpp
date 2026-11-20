@@ -1,6 +1,11 @@
 #pragma once
 
+#ifndef __ANDROID__
 #include <GLFW/glfw3.h>
+#else
+struct ANativeWindow;
+struct GLFWwindow;
+#endif
 #include <cstdint>
 #include <string>
 
@@ -29,6 +34,11 @@ public:
     void ResetResizedFlag() { m_Data.framebufferResized = false; }
 
     GLFWwindow* GetNativeWindow() const { return m_Window; }
+#ifdef __ANDROID__
+    ANativeWindow* GetAndroidWindow() const { return m_AndroidWindow; }
+    static void SetAndroidWindow(ANativeWindow* win, uint32_t w, uint32_t h);
+    static void RequestAndroidClose();
+#endif
 
 private:
     struct WindowData {
@@ -39,6 +49,9 @@ private:
     };
 
     GLFWwindow* m_Window = nullptr;
+#ifdef __ANDROID__
+    ANativeWindow* m_AndroidWindow = nullptr;
+#endif
     WindowData m_Data;
     bool m_GlfwInitialized = false;
 };

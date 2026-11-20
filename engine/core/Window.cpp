@@ -1,9 +1,60 @@
 #include "core/Window.hpp"
 #include "core/Log.hpp"
 
+#ifdef __ANDROID__
+#include <android/native_window.h>
+#endif
+
 #include <stdexcept>
 
 namespace Kyumist {
+
+#ifdef __ANDROID__
+namespace {
+ANativeWindow* s_AndroidWin = nullptr;
+uint32_t s_AndroidW = 1280;
+uint32_t s_AndroidH = 720;
+bool s_AndroidClose = false;
+} // namespace
+
+void Window::SetAndroidWindow(ANativeWindow* win, uint32_t w, uint32_t h) {
+    s_AndroidWin = win;
+    s_AndroidW = w > 0 ? w : 1280;
+    s_AndroidH = h > 0 ? h : 720;
+}
+
+void Window::RequestAndroidClose() {
+    s_AndroidClose = true;
+}
+
+Window::Window(const WindowProps& props) {
+    m_Data.title = props.title;
+    m_AndroidWindow = s_AndroidWin;
+    m_Data.width = s_AndroidWin ? static_cast<uint32_t>(ANativeWindow_getWidth(s_AndroidWin)) : s_AndroidW;
+    m_Data.height = s_AndroidWin ? static_cast<uint32_t>(ANativeWindow_getHeight(s_AndroidWin)) : s_AndroidH;
+}
+
+Window::~Window() {
+    m_AndroidWindow = nullptr;
+}
+
+void Window::PollEvents() {
+    if (s_AndroidWin) {
+        const uint32_t nw = static_cast<uint32_t>(ANativeWindow_getWidth(s_AndroidWin));
+        const uint32_t nh = static_cast<uint32_t>(ANativeWindow_getHeight(s_AndroidWin));
+        if (nw > 0 && nh > 0 && (nw != m_Data.width || nh != m_Data.height)) {
+            m_Data.width = nw;
+            m_Data.height = nh;
+            m_Data.framebufferResized = true;
+        }
+    }
+}
+
+bool Window::ShouldClose() const {
+    return s_AndroidClose;
+}
+
+#else
 
 namespace {
 
@@ -87,6 +138,8 @@ void Window::PollEvents() {
 bool Window::ShouldClose() const {
     return m_Window ? glfwWindowShouldClose(m_Window) != 0 : true;
 }
+
+#endif
 
 } // namespace Kyumist
 

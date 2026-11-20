@@ -2,6 +2,7 @@ add_library(kyumist_engine STATIC
     core/Log.cpp
     core/Window.cpp
     core/Application.cpp
+    core/InputMap.cpp
     renderer/ModelLoader.cpp
     renderer/VulkanRenderer.cpp
     scene/EditorCamera.cpp
@@ -11,6 +12,8 @@ add_library(kyumist_engine STATIC
     physics/PhysicsSystem.cpp
     audio/AudioEngine.cpp
     project/ProjectManager.cpp
+    ui/TouchControlsOverlay.cpp
+    ui/UISystem.cpp
 )
 
 add_dependencies(kyumist_engine kyumist_shaders kyumist_java_api)
@@ -60,6 +63,7 @@ target_link_libraries(kyumist_engine PUBLIC
     EnTT::EnTT
     nlohmann_json::nlohmann_json
     ZLIB::ZLIB
+    RmlUi::RmlUi
     ${JAVA_JVM_LIBRARY}
     ${CMAKE_DL_LIBS}
     Threads::Threads

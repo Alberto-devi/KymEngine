@@ -100,6 +100,7 @@ private:
 
     entt::entity DuplicateEntity(Scene& scene, entt::entity src);
     void RenderExportProjectModal();
+    void RenderInputMapModal();
 
     ScriptEditorPanel m_ScriptEditor;
 
@@ -175,6 +176,10 @@ private:
     std::future<bool> m_ExportFuture;
     std::string m_ExportStatus;
     std::string m_ExportError;
+
+    bool m_OpenInputMapModal = false;
+    char m_NewActionName[64] = "shoot";
+    std::string m_ListeningActionName;
 };
 
 } // namespace Kyumist

@@ -13,7 +13,18 @@ public abstract class KyumistScript {
 
     public void onCollisionEnter(Entity other) {}
 
+    public void onUIEvent(String elementId, String eventType) {}
+
     public void onDestroy() {}
+
+    protected void loadScene(String relativeScenePath) {
+        NativeBridge.loadScene(relativeScenePath);
+    }
+
+    protected Entity spawnPrefab(String relativePrefabPath, float x, float y, float z) {
+        long id = NativeBridge.spawnPrefab(relativePrefabPath, x, y, z);
+        return (id >= 0) ? new Entity(id) : null;
+    }
 
     protected Entity findEntity(String name) {
         long id = NativeBridge.findEntityByName(name);

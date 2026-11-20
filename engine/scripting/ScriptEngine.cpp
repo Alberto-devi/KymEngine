@@ -1,14 +1,20 @@
 #include "scripting/ScriptEngine.hpp"
 
 #include "audio/AudioEngine.hpp"
+#include "core/InputMap.hpp"
 #include "core/Log.hpp"
 #include "core/PlatformPaths.hpp"
 #include "core/Window.hpp"
 #include "physics/PhysicsSystem.hpp"
+#include "project/ProjectManager.hpp"
 #include "scene/Components.hpp"
 #include "scene/Scene.hpp"
+#include "scene/SceneSerializer.hpp"
+#include "ui/UISystem.hpp"
 
+#ifndef __ANDROID__
 #include <GLFW/glfw3.h>
+#endif
 #include <jni.h>
 
 #include <algorithm>
@@ -37,8 +43,10 @@ struct ScriptEngineState {
     jmethodID createInstanceMethod = nullptr;
     jmethodID updateInstanceMethod = nullptr;
     jmethodID dispatchCollisionMethod = nullptr;
+    jmethodID dispatchUIEventMethod = nullptr;
     jmethodID destroyInstanceMethod = nullptr;
     jmethodID destroyAllMethod = nullptr;
+    std::string pendingSceneLoad;
 };
 
 ScriptEngineState s_State;
@@ -240,12 +248,17 @@ void JNICALL Native_SetColor(JNIEnv* /*env*/, jclass /*cls*/, jlong entityId, jf
 }
 
 jboolean JNICALL Native_IsKeyDown(JNIEnv* /*env*/, jclass /*cls*/, jint keyCode) {
+#ifndef __ANDROID__
     if (!s_State.window || !s_State.window->GetNativeWindow()) {
         return JNI_FALSE;
     }
     return glfwGetKey(s_State.window->GetNativeWindow(), static_cast<int>(keyCode)) == GLFW_PRESS
         ? JNI_TRUE
         : JNI_FALSE;
+#else
+    (void)keyCode;
+    return JNI_FALSE;
+#endif
 }
 
 void JNICALL Native_GetVelocity(JNIEnv* env, jclass /*cls*/, jlong entityId, jfloatArray outXYZ) {
@@ -380,12 +393,17 @@ void JNICALL Native_SetUIText(JNIEnv* env, jclass /*cls*/, jlong entityId, jstri
 }
 
 jboolean JNICALL Native_IsMouseButtonDown(JNIEnv* /*env*/, jclass /*cls*/, jint button) {
+#ifndef __ANDROID__
     if (!s_State.window || !s_State.window->GetNativeWindow()) {
         return JNI_FALSE;
     }
     return glfwGetMouseButton(s_State.window->GetNativeWindow(), static_cast<int>(button)) == GLFW_PRESS
         ? JNI_TRUE
         : JNI_FALSE;
+#else
+    (void)button;
+    return JNI_FALSE;
+#endif
 }
 
 void JNICALL Native_GetMousePosition(JNIEnv* env, jclass /*cls*/, jfloatArray outXY) {
@@ -393,7 +411,9 @@ void JNICALL Native_GetMousePosition(JNIEnv* env, jclass /*cls*/, jfloatArray ou
         return;
     }
     double mx = 0.0, my = 0.0;
+#ifndef __ANDROID__
     glfwGetCursorPos(s_State.window->GetNativeWindow(), &mx, &my);
+#endif
     const std::array<jfloat, 2> vals{static_cast<jfloat>(mx), static_cast<jfloat>(my)};
     env->SetFloatArrayRegion(outXY, 0, 2, vals.data());
 }
@@ -442,6 +462,96 @@ jlong JNICALL Native_Raycast(
     return static_cast<jlong>(entt::to_integral(hit.entity));
 }
 
+void JNICALL Native_LoadScene(JNIEnv* env, jclass /*cls*/, jstring jPath) {
+    const std::string rel = JStringToStdString(env, jPath);
+    if (!rel.empty()) {
+        s_State.pendingSceneLoad = rel;
+    }
+}
+
+jlong JNICALL Native_SpawnPrefab(JNIEnv* env, jclass /*cls*/, jstring jPath, jfloat x, jfloat y, jfloat z) {
+    if (!s_State.activeScene) {
+        return -1;
+    }
+    const std::string rel = JStringToStdString(env, jPath);
+    if (rel.empty()) {
+        return -1;
+    }
+    std::filesystem::path resolved = PlatformPaths::Utf8ToPath(rel);
+    std::error_code ec;
+    if (!std::filesystem::exists(resolved, ec) && ProjectManager::HasActiveProject()) {
+        resolved = ProjectManager::GetActiveProjectDir() / resolved;
+    }
+    const entt::entity spawned = SceneSerializer::LoadPrefab(*s_State.activeScene, resolved);
+    if (spawned == entt::null || !s_State.activeScene->IsValid(spawned)) {
+        return -1;
+    }
+    auto& reg = s_State.activeScene->GetRegistry();
+    if (reg.all_of<TransformComponent>(spawned)) {
+        reg.get<TransformComponent>(spawned).translation = {x, y, z};
+    }
+    const jlong eid = static_cast<jlong>(entt::to_integral(spawned));
+    if (reg.all_of<JavaScriptComponent>(spawned) && s_State.env && s_State.scriptHostClass && s_State.createInstanceMethod) {
+        const auto& js = reg.get<JavaScriptComponent>(spawned);
+        if (js.enabled && !js.className.empty()) {
+            jstring jClass = s_State.env->NewStringUTF(js.className.c_str());
+            s_State.env->CallStaticBooleanMethod(s_State.scriptHostClass, s_State.createInstanceMethod, eid, jClass);
+            s_State.env->DeleteLocalRef(jClass);
+            CheckAndClearException(s_State.env, "ScriptHost.createInstance(spawnPrefab)");
+        }
+    }
+    return eid;
+}
+
+jboolean JNICALL Native_IsActionPressed(JNIEnv* env, jclass /*cls*/, jstring jAction) {
+    return InputMap::IsActionPressed(JStringToStdString(env, jAction)) ? JNI_TRUE : JNI_FALSE;
+}
+
+jboolean JNICALL Native_IsActionJustPressed(JNIEnv* env, jclass /*cls*/, jstring jAction) {
+    return InputMap::IsActionJustPressed(JStringToStdString(env, jAction)) ? JNI_TRUE : JNI_FALSE;
+}
+
+jboolean JNICALL Native_IsActionJustReleased(JNIEnv* env, jclass /*cls*/, jstring jAction) {
+    return InputMap::IsActionJustReleased(JStringToStdString(env, jAction)) ? JNI_TRUE : JNI_FALSE;
+}
+
+jfloat JNICALL Native_GetAxis(JNIEnv* env, jclass /*cls*/, jstring jNeg, jstring jPos) {
+    return InputMap::GetAxis(JStringToStdString(env, jNeg), JStringToStdString(env, jPos));
+}
+
+jfloat JNICALL Native_GetTouchAxisX(JNIEnv* /*env*/, jclass /*cls*/) {
+    return InputMap::GetTouchAxisX();
+}
+
+jfloat JNICALL Native_GetTouchAxisY(JNIEnv* /*env*/, jclass /*cls*/) {
+    return InputMap::GetTouchAxisY();
+}
+
+void JNICALL Native_SetMouseCaptured(JNIEnv* /*env*/, jclass /*cls*/, jboolean captured) {
+    GLFWwindow* nativeWin = s_State.window ? s_State.window->GetNativeWindow() : nullptr;
+    InputMap::SetMouseCaptured(nativeWin, captured == JNI_TRUE);
+}
+
+jboolean JNICALL Native_UILoadDocument(JNIEnv* env, jclass /*cls*/, jstring jPath) {
+    return UISystem::LoadDocument(JStringToStdString(env, jPath)) ? JNI_TRUE : JNI_FALSE;
+}
+
+void JNICALL Native_UIUnloadDocument(JNIEnv* env, jclass /*cls*/, jstring jPath) {
+    UISystem::UnloadDocument(JStringToStdString(env, jPath));
+}
+
+jboolean JNICALL Native_UISetText(JNIEnv* env, jclass /*cls*/, jstring jId, jstring jText) {
+    return UISystem::SetText(JStringToStdString(env, jId), JStringToStdString(env, jText)) ? JNI_TRUE : JNI_FALSE;
+}
+
+jboolean JNICALL Native_UISetVisible(JNIEnv* env, jclass /*cls*/, jstring jId, jboolean visible) {
+    return UISystem::SetVisible(JStringToStdString(env, jId), visible == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
+jboolean JNICALL Native_UISetClass(JNIEnv* env, jclass /*cls*/, jstring jId, jstring jCls, jboolean active) {
+    return UISystem::SetClass(JStringToStdString(env, jId), JStringToStdString(env, jCls), active == JNI_TRUE) ? JNI_TRUE : JNI_FALSE;
+}
+
 bool RegisterNativeBridge(JNIEnv* env) {
     jclass bridgeClass = env->FindClass("dev/kyumist/NativeBridge");
     if (!bridgeClass || CheckAndClearException(env, "FindClass(NativeBridge)")) {
@@ -452,33 +562,47 @@ bool RegisterNativeBridge(JNIEnv* env) {
         return JNINativeMethod{const_cast<char*>(name), const_cast<char*>(sig), fn};
     };
 
-    const std::array<JNINativeMethod, 26> methods{{
-        makeMethod("logInfo",            "(Ljava/lang/String;)V",       reinterpret_cast<void*>(Native_LogInfo)),
-        makeMethod("logWarn",            "(Ljava/lang/String;)V",       reinterpret_cast<void*>(Native_LogWarn)),
-        makeMethod("logError",           "(Ljava/lang/String;)V",       reinterpret_cast<void*>(Native_LogError)),
-        makeMethod("getName",            "(J)Ljava/lang/String;",       reinterpret_cast<void*>(Native_GetName)),
-        makeMethod("setName",            "(JLjava/lang/String;)V",      reinterpret_cast<void*>(Native_SetName)),
-        makeMethod("findEntityByName",   "(Ljava/lang/String;)J",       reinterpret_cast<void*>(Native_FindEntityByName)),
-        makeMethod("spawnCube",          "(Ljava/lang/String;FFF)J",    reinterpret_cast<void*>(Native_SpawnCube)),
-        makeMethod("destroyEntity",      "(J)V",                        reinterpret_cast<void*>(Native_DestroyEntity)),
-        makeMethod("getPosition",        "(J[F)V",                      reinterpret_cast<void*>(Native_GetPosition)),
-        makeMethod("setPosition",        "(JFFF)V",                     reinterpret_cast<void*>(Native_SetPosition)),
-        makeMethod("getRotation",        "(J[F)V",                      reinterpret_cast<void*>(Native_GetRotation)),
-        makeMethod("setRotation",        "(JFFF)V",                     reinterpret_cast<void*>(Native_SetRotation)),
-        makeMethod("getScale",           "(J[F)V",                      reinterpret_cast<void*>(Native_GetScale)),
-        makeMethod("setScale",           "(JFFF)V",                     reinterpret_cast<void*>(Native_SetScale)),
-        makeMethod("setColor",           "(JFFFF)V",                    reinterpret_cast<void*>(Native_SetColor)),
-        makeMethod("setUIText",          "(JLjava/lang/String;)V",      reinterpret_cast<void*>(Native_SetUIText)),
-        makeMethod("isKeyDown",          "(I)Z",                        reinterpret_cast<void*>(Native_IsKeyDown)),
-        makeMethod("isMouseButtonDown",  "(I)Z",                        reinterpret_cast<void*>(Native_IsMouseButtonDown)),
-        makeMethod("getMousePosition",   "([F)V",                       reinterpret_cast<void*>(Native_GetMousePosition)),
-        makeMethod("getVelocity",        "(J[F)V",                      reinterpret_cast<void*>(Native_GetVelocity)),
-        makeMethod("setVelocity",        "(JFFF)V",                     reinterpret_cast<void*>(Native_SetVelocity)),
-        makeMethod("getAngularVelocity", "(J[F)V",                      reinterpret_cast<void*>(Native_GetAngularVelocity)),
-        makeMethod("setAngularVelocity", "(JFFF)V",                     reinterpret_cast<void*>(Native_SetAngularVelocity)),
-        makeMethod("applyImpulse",       "(JFFF)V",                     reinterpret_cast<void*>(Native_ApplyImpulse)),
-        makeMethod("raycast",            "(FFFFFFF)J",                  reinterpret_cast<void*>(Native_Raycast)),
-        makeMethod("playSound",          "(Ljava/lang/String;F)V",      reinterpret_cast<void*>(Native_PlaySound))
+    const std::array<JNINativeMethod, 40> methods{{
+        makeMethod("logInfo",              "(Ljava/lang/String;)V",       reinterpret_cast<void*>(Native_LogInfo)),
+        makeMethod("logWarn",              "(Ljava/lang/String;)V",       reinterpret_cast<void*>(Native_LogWarn)),
+        makeMethod("logError",             "(Ljava/lang/String;)V",       reinterpret_cast<void*>(Native_LogError)),
+        makeMethod("getName",              "(J)Ljava/lang/String;",       reinterpret_cast<void*>(Native_GetName)),
+        makeMethod("setName",              "(JLjava/lang/String;)V",      reinterpret_cast<void*>(Native_SetName)),
+        makeMethod("findEntityByName",     "(Ljava/lang/String;)J",       reinterpret_cast<void*>(Native_FindEntityByName)),
+        makeMethod("spawnCube",            "(Ljava/lang/String;FFF)J",    reinterpret_cast<void*>(Native_SpawnCube)),
+        makeMethod("spawnPrefab",          "(Ljava/lang/String;FFF)J",    reinterpret_cast<void*>(Native_SpawnPrefab)),
+        makeMethod("destroyEntity",        "(J)V",                        reinterpret_cast<void*>(Native_DestroyEntity)),
+        makeMethod("loadScene",            "(Ljava/lang/String;)V",       reinterpret_cast<void*>(Native_LoadScene)),
+        makeMethod("getPosition",          "(J[F)V",                      reinterpret_cast<void*>(Native_GetPosition)),
+        makeMethod("setPosition",          "(JFFF)V",                     reinterpret_cast<void*>(Native_SetPosition)),
+        makeMethod("getRotation",          "(J[F)V",                      reinterpret_cast<void*>(Native_GetRotation)),
+        makeMethod("setRotation",          "(JFFF)V",                     reinterpret_cast<void*>(Native_SetRotation)),
+        makeMethod("getScale",             "(J[F)V",                      reinterpret_cast<void*>(Native_GetScale)),
+        makeMethod("setScale",             "(JFFF)V",                     reinterpret_cast<void*>(Native_SetScale)),
+        makeMethod("setColor",             "(JFFFF)V",                    reinterpret_cast<void*>(Native_SetColor)),
+        makeMethod("setUIText",            "(JLjava/lang/String;)V",      reinterpret_cast<void*>(Native_SetUIText)),
+        makeMethod("isKeyDown",            "(I)Z",                        reinterpret_cast<void*>(Native_IsKeyDown)),
+        makeMethod("isMouseButtonDown",    "(I)Z",                        reinterpret_cast<void*>(Native_IsMouseButtonDown)),
+        makeMethod("getMousePosition",     "([F)V",                       reinterpret_cast<void*>(Native_GetMousePosition)),
+        makeMethod("isActionPressed",      "(Ljava/lang/String;)Z",       reinterpret_cast<void*>(Native_IsActionPressed)),
+        makeMethod("isActionJustPressed",  "(Ljava/lang/String;)Z",       reinterpret_cast<void*>(Native_IsActionJustPressed)),
+        makeMethod("isActionJustReleased", "(Ljava/lang/String;)Z",       reinterpret_cast<void*>(Native_IsActionJustReleased)),
+        makeMethod("getAxis",              "(Ljava/lang/String;Ljava/lang/String;)F", reinterpret_cast<void*>(Native_GetAxis)),
+        makeMethod("getTouchAxisX",        "()F",                         reinterpret_cast<void*>(Native_GetTouchAxisX)),
+        makeMethod("getTouchAxisY",        "()F",                         reinterpret_cast<void*>(Native_GetTouchAxisY)),
+        makeMethod("setMouseCaptured",     "(Z)V",                        reinterpret_cast<void*>(Native_SetMouseCaptured)),
+        makeMethod("uiLoadDocument",       "(Ljava/lang/String;)Z",       reinterpret_cast<void*>(Native_UILoadDocument)),
+        makeMethod("uiUnloadDocument",     "(Ljava/lang/String;)V",       reinterpret_cast<void*>(Native_UIUnloadDocument)),
+        makeMethod("uiSetText",            "(Ljava/lang/String;Ljava/lang/String;)Z", reinterpret_cast<void*>(Native_UISetText)),
+        makeMethod("uiSetVisible",         "(Ljava/lang/String;Z)Z",      reinterpret_cast<void*>(Native_UISetVisible)),
+        makeMethod("uiSetClass",           "(Ljava/lang/String;Ljava/lang/String;Z)Z", reinterpret_cast<void*>(Native_UISetClass)),
+        makeMethod("getVelocity",          "(J[F)V",                      reinterpret_cast<void*>(Native_GetVelocity)),
+        makeMethod("setVelocity",          "(JFFF)V",                     reinterpret_cast<void*>(Native_SetVelocity)),
+        makeMethod("getAngularVelocity",   "(J[F)V",                      reinterpret_cast<void*>(Native_GetAngularVelocity)),
+        makeMethod("setAngularVelocity",   "(JFFF)V",                     reinterpret_cast<void*>(Native_SetAngularVelocity)),
+        makeMethod("applyImpulse",         "(JFFF)V",                     reinterpret_cast<void*>(Native_ApplyImpulse)),
+        makeMethod("raycast",              "(FFFFFFF)J",                  reinterpret_cast<void*>(Native_Raycast)),
+        makeMethod("playSound",            "(Ljava/lang/String;F)V",      reinterpret_cast<void*>(Native_PlaySound))
     }};
 
     const jint res = env->RegisterNatives(bridgeClass, methods.data(), static_cast<jint>(methods.size()));
@@ -559,6 +683,8 @@ void ScriptEngine::Init(Window* window) {
         s_State.scriptHostClass, "updateInstance", "(JF)V");
     s_State.dispatchCollisionMethod = s_State.env->GetStaticMethodID(
         s_State.scriptHostClass, "dispatchCollision", "(JJ)V");
+    s_State.dispatchUIEventMethod = s_State.env->GetStaticMethodID(
+        s_State.scriptHostClass, "dispatchUIEvent", "(Ljava/lang/String;Ljava/lang/String;)V");
     s_State.destroyInstanceMethod = s_State.env->GetStaticMethodID(
         s_State.scriptHostClass, "destroyInstance", "(J)V");
     s_State.destroyAllMethod = s_State.env->GetStaticMethodID(
@@ -572,6 +698,10 @@ void ScriptEngine::Init(Window* window) {
         Shutdown();
         return;
     }
+
+    UISystem::SetEventCallback([](const std::string& elementId, const std::string& eventType) {
+        ScriptEngine::NotifyUIEvent(elementId, eventType);
+    });
 
     CompileAndReloadScripts(nullptr, false);
 }
@@ -824,6 +954,28 @@ void ScriptEngine::NotifyCollision(Scene* scene, entt::entity self, entt::entity
     const jlong otherId = static_cast<jlong>(entt::to_integral(other));
     s_State.env->CallStaticVoidMethod(s_State.scriptHostClass, s_State.dispatchCollisionMethod, selfId, otherId);
     CheckAndClearException(s_State.env, "ScriptHost.dispatchCollision");
+}
+
+void ScriptEngine::NotifyUIEvent(const std::string& elementId, const std::string& eventType) {
+    if (!IsInitialized() || !s_State.scriptHostClass || !s_State.dispatchUIEventMethod) {
+        return;
+    }
+    jstring jId = s_State.env->NewStringUTF(elementId.c_str());
+    jstring jEv = s_State.env->NewStringUTF(eventType.c_str());
+    s_State.env->CallStaticVoidMethod(s_State.scriptHostClass, s_State.dispatchUIEventMethod, jId, jEv);
+    s_State.env->DeleteLocalRef(jId);
+    s_State.env->DeleteLocalRef(jEv);
+    CheckAndClearException(s_State.env, "ScriptHost.dispatchUIEvent");
+}
+
+bool ScriptEngine::HasPendingSceneLoad() {
+    return !s_State.pendingSceneLoad.empty();
+}
+
+std::string ScriptEngine::ConsumePendingSceneLoad() {
+    std::string out = std::move(s_State.pendingSceneLoad);
+    s_State.pendingSceneLoad.clear();
+    return out;
 }
 
 std::vector<std::string> ScriptEngine::GetAvailableScriptNames() {

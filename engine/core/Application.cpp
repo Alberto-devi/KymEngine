@@ -50,6 +50,7 @@ void Application::Run() {
     while (!m_ShouldClose) {
         if (m_Window) {
             m_Window->PollEvents();
+#ifndef __ANDROID__
             if (m_Window->ShouldClose() ||
                 glfwGetKey(m_Window->GetNativeWindow(), GLFW_KEY_ESCAPE) == GLFW_PRESS) {
                 break;
@@ -58,6 +59,11 @@ void Application::Run() {
                 glfwWaitEvents();
                 continue;
             }
+#else
+            if (m_Window->ShouldClose()) {
+                break;
+            }
+#endif
         }
 
         const auto now = std::chrono::steady_clock::now();

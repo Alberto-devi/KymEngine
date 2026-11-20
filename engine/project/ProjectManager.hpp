@@ -34,7 +34,8 @@ struct SampleProjectEntry {
 
 enum class ExportPlatform {
     WindowsX64 = 0,
-    LinuxX64 = 1
+    LinuxX64 = 1,
+    AndroidAPK = 2
 };
 
 struct ExportOptions {

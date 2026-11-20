@@ -1,6 +1,7 @@
 #include "project/ProjectManager.hpp"
 
 #include "audio/AudioEngine.hpp"
+#include "core/InputMap.hpp"
 #include "core/Log.hpp"
 #include "core/PlatformPaths.hpp"
 #include "renderer/ModelLoader.hpp"
@@ -8,6 +9,7 @@
 #include "scene/Scene.hpp"
 #include "scene/SceneSerializer.hpp"
 #include "scripting/ScriptEngine.hpp"
+#include "ui/TouchControlsOverlay.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -1394,6 +1396,9 @@ bool ProjectManager::OpenProject(const std::filesystem::path& projectFileOrDir) 
 
     RegisterRecentProject(cfg.name, resolvedFile);
 
+    InputMap::LoadFromProject(cfg.projectDir);
+    TouchControlsOverlay::LoadFromProject(cfg.projectDir);
+
     AudioEngine::SetAssetsDirectory(cfg.projectDir);
     AudioEngine::EnsureBounceWavInDir(cfg.projectDir);
 
@@ -1468,7 +1473,7 @@ bool ProjectManager::ExportProjectBuild(const std::filesystem::path& outputDir, 
 
     const std::filesystem::path projDir = GetActiveProjectDir();
     const std::vector<std::string> foldersToCopy = {
-        "scenes", "scripts", "models", "materials", "textures", "audio", "prefabs"
+        "scenes", "scripts", "models", "materials", "textures", "audio", "prefabs", "ui"
     };
 
     for (const auto& folder : foldersToCopy) {
@@ -1590,11 +1595,21 @@ bool ProjectManager::ExportProjectBuild(const std::filesystem::path& outputDir, 
 namespace {
 
 const char* PlatformSubdir(ExportPlatform platform) {
-    return platform == ExportPlatform::WindowsX64 ? "windows-x64" : "linux-x64";
+    switch (platform) {
+    case ExportPlatform::WindowsX64: return "windows-x64";
+    case ExportPlatform::LinuxX64: return "linux-x64";
+    case ExportPlatform::AndroidAPK: return "android-apk";
+    }
+    return "linux-x64";
 }
 
 const char* RuntimeFileName(ExportPlatform platform) {
-    return platform == ExportPlatform::WindowsX64 ? "KyumistRuntime.exe" : "KyumistRuntime";
+    switch (platform) {
+    case ExportPlatform::WindowsX64: return "KyumistRuntime.exe";
+    case ExportPlatform::LinuxX64: return "KyumistRuntime";
+    case ExportPlatform::AndroidAPK: return "KymEngine-android-template.apk";
+    }
+    return "KyumistRuntime";
 }
 
 std::filesystem::path FindRuntimeInDir(const std::filesystem::path& dir, ExportPlatform platform) {
@@ -1717,9 +1732,12 @@ bool ProjectManager::HasExportTemplate(ExportPlatform platform) {
 
 bool ProjectManager::DownloadExportTemplate(ExportPlatform platform, std::string* outError) {
     std::error_code ec;
-    const std::string assetName = (platform == ExportPlatform::WindowsX64)
-        ? "KymEngine-windows-x64.zip"
-        : "KymEngine-linux-x64.tar.gz";
+    std::string assetName = "KymEngine-linux-x64.tar.gz";
+    if (platform == ExportPlatform::WindowsX64) {
+        assetName = "KymEngine-windows-x64.zip";
+    } else if (platform == ExportPlatform::AndroidAPK) {
+        assetName = "KymEngine-android-template.apk";
+    }
 
     const std::filesystem::path targetRoot =
         PlatformPaths::GetUserDataDir() / "templates" / KM_ENGINE_VERSION / PlatformSubdir(platform);
@@ -1753,6 +1771,17 @@ bool ProjectManager::DownloadExportTemplate(ExportPlatform platform, std::string
 
     std::filesystem::remove_all(targetRoot, ec);
     std::filesystem::create_directories(targetRoot, ec);
+
+    if (platform == ExportPlatform::AndroidAPK) {
+        std::filesystem::copy_file(
+            archivePath,
+            targetRoot / assetName,
+            std::filesystem::copy_options::overwrite_existing,
+            ec
+        );
+        std::filesystem::remove(archivePath, ec);
+        return !ec;
+    }
 
     const std::string extractFlag = (platform == ExportPlatform::WindowsX64) ? "-xf" : "-xzf";
     const std::string extractCmd =
@@ -1807,7 +1836,7 @@ bool ProjectManager::ExportProjectForPlatform(const ExportOptions& options, std:
 
     const std::filesystem::path projDir = GetActiveProjectDir();
     const std::vector<std::string> foldersToCopy = {
-        "scenes", "scripts", "models", "materials", "textures", "audio", "prefabs"
+        "scenes", "scripts", "models", "materials", "textures", "audio", "prefabs", "ui"
     };
     for (const auto& folder : foldersToCopy) {
         const std::filesystem::path src = projDir / folder;
@@ -1832,10 +1861,97 @@ bool ProjectManager::ExportProjectForPlatform(const ExportOptions& options, std:
             ec
         );
     }
+    const std::filesystem::path srcInputMap = projDir / "input_map.json";
+    if (std::filesystem::exists(srcInputMap, ec)) {
+        std::filesystem::copy_file(
+            srcInputMap,
+            options.outputDir / "input_map.json",
+            std::filesystem::copy_options::overwrite_existing,
+            ec
+        );
+    }
 
     const std::string baseName = SanitizeExecutableName(
         options.executableName.empty() ? s_Proj.activeConfig.name : options.executableName
     );
+
+    if (options.platform == ExportPlatform::AndroidAPK) {
+        const std::filesystem::path tplApk = templateDir / "KymEngine-android-template.apk";
+        const std::filesystem::path outApk = options.outputDir / (baseName + ".apk");
+        std::filesystem::copy_file(tplApk, outApk, std::filesystem::copy_options::overwrite_existing, ec);
+        if (ec) {
+            return setErr("No se pudo copiar la plantilla APK: " + ec.message());
+        }
+
+        // Copy project assets + input_map.json + shaders into staging assets/ folder
+        const std::filesystem::path stageRoot = options.outputDir / ".apk_stage";
+        const std::filesystem::path stageAssets = stageRoot / "assets";
+        std::filesystem::remove_all(stageRoot, ec);
+        std::filesystem::create_directories(stageAssets, ec);
+
+        const std::vector<std::string> androidFolders = {
+            "scenes", "scripts", "models", "materials", "textures", "audio", "prefabs", "ui"
+        };
+        for (const auto& f : androidFolders) {
+            const std::filesystem::path src = projDir / f;
+            if (std::filesystem::exists(src, ec)) {
+                std::filesystem::copy(
+                    src, stageAssets / f,
+                    std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing, ec
+                );
+            }
+        }
+        for (const char* rootFile : {"project.kmproj", "input_map.json"}) {
+            if (std::filesystem::exists(projDir / rootFile, ec)) {
+                std::filesystem::copy_file(
+                    projDir / rootFile, stageAssets / rootFile,
+                    std::filesystem::copy_options::overwrite_existing, ec
+                );
+            }
+        }
+
+        const std::filesystem::path shadersSrc = PlatformPaths::ResolveShadersDir();
+        if (std::filesystem::exists(shadersSrc, ec)) {
+            std::filesystem::create_directories(stageAssets / "shaders", ec);
+            for (const auto& entry : std::filesystem::directory_iterator(shadersSrc, ec)) {
+                if (entry.is_regular_file() && entry.path().extension() == ".spv") {
+                    std::filesystem::copy_file(
+                        entry.path(), stageAssets / "shaders" / entry.path().filename(),
+                        std::filesystem::copy_options::overwrite_existing, ec
+                    );
+                }
+            }
+        }
+
+        // Inject assets/ into the APK using jar (comes with JDK) or zip
+        const std::string injectCmd =
+            "cd " + QuoteShellArg(PlatformPaths::PathToUtf8(stageRoot)) +
+            " && jar uf " + QuoteShellArg(PlatformPaths::PathToUtf8(outApk)) + " assets";
+        (void)RunQuietCommand(injectCmd);
+        std::filesystem::remove_all(stageRoot, ec);
+
+        // Sign with debug keystore if jarsigner/keytool are available
+        const std::filesystem::path debugKeystore = PlatformPaths::GetUserDataDir() / "android_debug.keystore";
+        if (!std::filesystem::exists(debugKeystore, ec)) {
+            const std::string keyCmd =
+                "keytool -genkeypair -v -keystore " + QuoteShellArg(PlatformPaths::PathToUtf8(debugKeystore)) +
+                " -alias kymdebug -keyalg RSA -keysize 2048 -validity 10000"
+                " -storepass android -keypass android -dname \"CN=KymEngine,O=Kyumist,C=ES\"";
+            (void)RunQuietCommand(keyCmd);
+        }
+        if (std::filesystem::exists(debugKeystore, ec)) {
+            const std::string signCmd =
+                "jarsigner -keystore " + QuoteShellArg(PlatformPaths::PathToUtf8(debugKeystore)) +
+                " -storepass android -keypass android " +
+                QuoteShellArg(PlatformPaths::PathToUtf8(outApk)) + " kymdebug";
+            (void)RunQuietCommand(signCmd);
+        }
+
+        KM_INFO("Proyecto '{}' exportado para Android en '{}'.",
+                s_Proj.activeConfig.name, PlatformPaths::PathToUtf8(outApk));
+        return true;
+    }
+
     const std::string runtimeSrcName = RuntimeFileName(options.platform);
     const std::filesystem::path runtimeSrc = templateDir / runtimeSrcName;
     const std::string outExeName = (options.platform == ExportPlatform::WindowsX64)

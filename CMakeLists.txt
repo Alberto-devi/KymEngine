@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(KyumistEngine VERSION 0.2.7 LANGUAGES C CXX)
+project(KyumistEngine VERSION 0.3.0 LANGUAGES C CXX)
 
 if(NOT DEFINED KYMENGINE_VERSION OR "${KYMENGINE_VERSION}" STREQUAL "")
     set(KYMENGINE_VERSION "${PROJECT_VERSION}")
@@ -110,7 +110,38 @@ FetchContent_Declare(
     GIT_SHALLOW    TRUE
 )
 
-FetchContent_MakeAvailable(spdlog glfw glm vk-bootstrap VulkanMemoryAllocator imgui entt nlohmann_json)
+# FreeType (for RmlUi HTML/CSS font rendering)
+set(FT_DISABLE_HARFBUZZ ON CACHE BOOL "" FORCE)
+set(FT_DISABLE_BROTLI ON CACHE BOOL "" FORCE)
+set(FT_DISABLE_BZIP2 ON CACHE BOOL "" FORCE)
+set(FT_DISABLE_PNG ON CACHE BOOL "" FORCE)
+set(FT_DISABLE_ZLIB ON CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    freetype
+    GIT_REPOSITORY https://github.com/freetype/freetype.git
+    GIT_TAG        VER-2-13-3
+    GIT_SHALLOW    TRUE
+)
+
+# RmlUi (HTML/CSS UI engine)
+set(RMLUI_SAMPLES OFF CACHE BOOL "" FORCE)
+set(RMLUI_TESTS OFF CACHE BOOL "" FORCE)
+set(RMLUI_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(RMLUI_SVG_PLUGIN OFF CACHE BOOL "" FORCE)
+set(RMLUI_LOTTIE_PLUGIN OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    rmlui
+    GIT_REPOSITORY https://github.com/mikke89/RmlUi.git
+    GIT_TAG        6.0
+    GIT_SHALLOW    TRUE
+)
+
+FetchContent_MakeAvailable(spdlog glfw glm vk-bootstrap VulkanMemoryAllocator imgui entt nlohmann_json freetype)
+if(TARGET freetype AND NOT TARGET Freetype::Freetype)
+    add_library(Freetype::Freetype ALIAS freetype)
+endif()
+FetchContent_MakeAvailable(rmlui)
 
 if(NOT ZLIB_FOUND)
     FetchContent_Declare(
@@ -215,6 +246,8 @@ add_jar(kyumist_java_api
         "${CMAKE_SOURCE_DIR}/java-api/src/main/java/dev/kyumist/Entity.java"
         "${CMAKE_SOURCE_DIR}/java-api/src/main/java/dev/kyumist/Input.java"
         "${CMAKE_SOURCE_DIR}/java-api/src/main/java/dev/kyumist/Audio.java"
+        "${CMAKE_SOURCE_DIR}/java-api/src/main/java/dev/kyumist/UI.java"
+        "${CMAKE_SOURCE_DIR}/java-api/src/main/java/dev/kyumist/Scene.java"
         "${CMAKE_SOURCE_DIR}/java-api/src/main/java/dev/kyumist/KyumistScript.java"
         "${CMAKE_SOURCE_DIR}/java-api/src/main/java/dev/kyumist/ScriptHost.java"
     OUTPUT_NAME kyumist-api

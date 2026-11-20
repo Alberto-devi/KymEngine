@@ -65,6 +65,10 @@ public:
     void SetClearColor(const glm::vec4& color) { m_ClearColor = color; }
     void ClearModelCache();
 
+    uint64_t CreateUITextureRGBA(uint32_t width, uint32_t height, const uint8_t* rgbaPixels);
+    uint64_t LoadUITextureFile(const std::string& path, uint32_t& outWidth, uint32_t& outHeight);
+    void DestroyUITexture(uint64_t handle);
+
 private:
     struct GpuMesh {
         VkBuffer vertexBuffer = VK_NULL_HANDLE;
@@ -189,6 +193,7 @@ private:
 
     GpuTexture m_WhiteTexture;
     std::unordered_map<std::string, GpuTexture> m_Textures;
+    std::unordered_map<uint64_t, GpuTexture> m_UITextures;
 
     VkDescriptorPool m_ImGuiDescriptorPool = VK_NULL_HANDLE;
     bool m_ImGuiInitialized = false;

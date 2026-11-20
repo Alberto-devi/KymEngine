@@ -80,6 +80,16 @@ public final class ScriptHost {
         }
     }
 
+    public static void dispatchUIEvent(String elementId, String eventType) {
+        for (Map.Entry<Long, KyumistScript> entry : instances.entrySet()) {
+            try {
+                entry.getValue().onUIEvent(elementId, eventType);
+            } catch (Throwable t) {
+                NativeBridge.logError("Exception in onUIEvent for entity " + entry.getKey() + ": " + t.getMessage());
+            }
+        }
+    }
+
     public static void destroyInstance(long entityId) {
         KyumistScript script = instances.remove(entityId);
         if (script == null) {

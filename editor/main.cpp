@@ -1,6 +1,8 @@
 #include "audio/AudioEngine.hpp"
 #include "core/Application.hpp"
+#include "core/InputMap.hpp"
 #include "core/Log.hpp"
+#include "core/PlatformPaths.hpp"
 #include "panels/EditorPanels.hpp"
 #include "physics/PhysicsSystem.hpp"
 #include "project/ProjectManager.hpp"
@@ -8,6 +10,7 @@
 #include "scene/Scene.hpp"
 #include "scene/SceneSerializer.hpp"
 #include "scripting/ScriptEngine.hpp"
+#include "ui/UISystem.hpp"
 
 #include <cstdint>
 #include <cstdlib>
@@ -27,6 +30,7 @@ protected:
     void OnInit() override {
         m_Panels.SetHeadlessMode(GetSpecification().headless);
         Kyumist::AudioEngine::Init(GetSpecification().headless);
+        Kyumist::UISystem::Init(GetRenderer());
         Kyumist::ScriptEngine::Init(GetWindow());
         Kyumist::ProjectManager::EnsureSampleProjects();
 
@@ -56,12 +60,30 @@ protected:
         ++m_FrameCount;
         m_LastTimestep = ts;
 
+        GLFWwindow* nativeWindow = GetWindow() ? GetWindow()->GetNativeWindow() : nullptr;
+
         if (m_Panels.IsPlayingInProcess()) {
+            Kyumist::InputMap::Update(nativeWindow);
             Kyumist::ScriptEngine::OnRuntimeUpdate(&m_Scene, ts);
             Kyumist::PhysicsSystem::Step(&m_Scene, ts);
+
+            if (Kyumist::ScriptEngine::HasPendingSceneLoad()) {
+                const std::string relScene = Kyumist::ScriptEngine::ConsumePendingSceneLoad();
+                std::filesystem::path target = Kyumist::PlatformPaths::Utf8ToPath(relScene);
+                std::error_code ec;
+                if (!std::filesystem::exists(target, ec) && Kyumist::ProjectManager::HasActiveProject()) {
+                    target = Kyumist::ProjectManager::GetActiveProjectDir() / target;
+                }
+                if (std::filesystem::exists(target, ec)) {
+                    Kyumist::ScriptEngine::OnRuntimeStop(&m_Scene);
+                    Kyumist::UISystem::UnloadAllDocuments();
+                    Kyumist::SceneSerializer::LoadFromFile(m_Scene, target);
+                    Kyumist::ScriptEngine::OnRuntimeStart(&m_Scene);
+                    Kyumist::PhysicsSystem::OnRuntimeStart(&m_Scene);
+                }
+            }
         }
 
-        GLFWwindow* nativeWindow = GetWindow() ? GetWindow()->GetNativeWindow() : nullptr;
         m_EditorCamera.OnUpdate(ts, nativeWindow, m_Panels.IsViewportHovered(), m_Panels.ConsumeScrollDelta());
 
         const VkExtent2D extent = GetRenderer()->GetSceneExtent();
@@ -95,6 +117,7 @@ protected:
         if (m_Panels.IsPlaying()) {
             m_Panels.StopPlayMode(m_Scene);
         }
+        Kyumist::UISystem::Shutdown();
         Kyumist::ScriptEngine::Shutdown();
         Kyumist::AudioEngine::Shutdown();
         KM_INFO("Kyumist Editor shutting down cleanly.");

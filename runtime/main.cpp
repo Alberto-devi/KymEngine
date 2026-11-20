@@ -1,5 +1,6 @@
 #include "audio/AudioEngine.hpp"
 #include "core/Application.hpp"
+#include "core/InputMap.hpp"
 #include "core/Log.hpp"
 #include "core/PlatformPaths.hpp"
 #include "physics/PhysicsSystem.hpp"
@@ -9,6 +10,8 @@
 #include "scene/Scene.hpp"
 #include "scene/SceneSerializer.hpp"
 #include "scripting/ScriptEngine.hpp"
+#include "ui/TouchControlsOverlay.hpp"
+#include "ui/UISystem.hpp"
 
 #include <imgui.h>
 
@@ -36,6 +39,7 @@ public:
 protected:
     void OnInit() override {
         Kyumist::AudioEngine::Init(GetSpecification().headless);
+        Kyumist::UISystem::Init(GetRenderer());
         Kyumist::ScriptEngine::Init(GetWindow());
 
         bool projectOpened = false;
@@ -79,8 +83,29 @@ protected:
         ++m_FrameCount;
         m_LastTimestep = ts;
 
+        GLFWwindow* nativeWindow = GetWindow() ? GetWindow()->GetNativeWindow() : nullptr;
+        Kyumist::InputMap::Update(nativeWindow);
+
         Kyumist::ScriptEngine::OnRuntimeUpdate(&m_Scene, ts);
         Kyumist::PhysicsSystem::Step(&m_Scene, ts);
+
+        if (Kyumist::ScriptEngine::HasPendingSceneLoad()) {
+            const std::string relScene = Kyumist::ScriptEngine::ConsumePendingSceneLoad();
+            std::filesystem::path target = Kyumist::PlatformPaths::Utf8ToPath(relScene);
+            std::error_code ec;
+            if (!std::filesystem::exists(target, ec) && Kyumist::ProjectManager::HasActiveProject()) {
+                target = Kyumist::ProjectManager::GetActiveProjectDir() / target;
+            }
+            if (std::filesystem::exists(target, ec)) {
+                Kyumist::ScriptEngine::OnRuntimeStop(&m_Scene);
+                Kyumist::UISystem::UnloadAllDocuments();
+                Kyumist::SceneSerializer::LoadFromFile(m_Scene, target);
+                Kyumist::ScriptEngine::OnRuntimeStart(&m_Scene);
+                Kyumist::PhysicsSystem::OnRuntimeStart(&m_Scene);
+            } else {
+                KM_WARN("Requested scene not found: '{}'.", relScene);
+            }
+        }
 
         const VkExtent2D extent = GetRenderer()->GetSceneExtent();
         const float aspect = extent.height > 0
@@ -151,11 +176,22 @@ protected:
                 6.0f
             );
             bg->AddText(ImVec2(boxX + 10.0f, 19.0f), IM_COL32(230, 236, 245, 255), hud);
+
+            Kyumist::UISystem::UpdateAndRender(bg, ImVec2(0.0f, 0.0f), io.DisplaySize, true);
+#ifdef __ANDROID__
+            constexpr bool isMobile = true;
+#else
+            constexpr bool isMobile = false;
+#endif
+            if (Kyumist::TouchControlsOverlay::ShouldShow(isMobile)) {
+                Kyumist::TouchControlsOverlay::RenderAndProcess(bg, ImVec2(0.0f, 0.0f), io.DisplaySize, true);
+            }
         }
     }
 
     void OnShutdown() override {
         Kyumist::ScriptEngine::OnRuntimeStop(&m_Scene);
+        Kyumist::UISystem::Shutdown();
         Kyumist::ScriptEngine::Shutdown();
         Kyumist::AudioEngine::Shutdown();
         KM_INFO("Kyumist Runtime shutting down cleanly.");

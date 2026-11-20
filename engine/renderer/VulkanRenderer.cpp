@@ -11,7 +11,11 @@
 
 #include <VkBootstrap.h>
 #include <imgui.h>
+#ifndef __ANDROID__
 #include <imgui_impl_glfw.h>
+#else
+#include <vulkan/vulkan_android.h>
+#endif
 #include <imgui_impl_vulkan.h>
 #include <ImGuizmo.h>
 
@@ -328,6 +332,10 @@ VulkanRenderer::~VulkanRenderer() {
         DestroyTexture(tex);
     }
     m_Textures.clear();
+    for (auto& [handle, tex] : m_UITextures) {
+        DestroyTexture(tex);
+    }
+    m_UITextures.clear();
 
     for (auto& frame : m_Frames) {
         if (frame.spriteBatchBuffer != VK_NULL_HANDLE && m_Allocator != VK_NULL_HANDLE) {
@@ -417,10 +425,20 @@ void VulkanRenderer::InitVulkan() {
     m_DebugMessenger = vkbInstance.debug_messenger;
 
     if (!m_Headless) {
+#ifdef __ANDROID__
+        VkAndroidSurfaceCreateInfoKHR surfInfo{};
+        surfInfo.sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR;
+        surfInfo.window = m_Window->GetAndroidWindow();
+        CheckVkResult(
+            vkCreateAndroidSurfaceKHR(m_Instance, &surfInfo, nullptr, &m_Surface),
+            "vkCreateAndroidSurfaceKHR"
+        );
+#else
         CheckVkResult(
             glfwCreateWindowSurface(m_Instance, m_Window->GetNativeWindow(), nullptr, &m_Surface),
             "glfwCreateWindowSurface"
         );
+#endif
     }
 
     VkPhysicalDeviceVulkan13Features features13{};
@@ -560,7 +578,9 @@ void VulkanRenderer::RecreateSwapchain() {
     int width = static_cast<int>(m_Window->GetWidth());
     int height = static_cast<int>(m_Window->GetHeight());
     while (width == 0 || height == 0) {
+#ifndef __ANDROID__
         glfwWaitEvents();
+#endif
         if (m_Window->ShouldClose()) {
             return;
         }
@@ -1295,6 +1315,57 @@ VkDescriptorSet VulkanRenderer::GetOrLoadTextureDescriptor(const std::string& te
     return inserted->second.descriptorSet;
 }
 
+uint64_t VulkanRenderer::CreateUITextureRGBA(uint32_t width, uint32_t height, const uint8_t* rgbaPixels) {
+    if (m_Device == VK_NULL_HANDLE || width == 0 || height == 0 || rgbaPixels == nullptr) {
+        return 0;
+    }
+    GpuTexture tex = CreateTextureFromRGBA(width, height, rgbaPixels);
+    const uint64_t handle = reinterpret_cast<uint64_t>(tex.descriptorSet);
+    m_UITextures[handle] = tex;
+    return handle;
+}
+
+uint64_t VulkanRenderer::LoadUITextureFile(const std::string& path, uint32_t& outWidth, uint32_t& outHeight) {
+    outWidth = 0;
+    outHeight = 0;
+    if (m_Device == VK_NULL_HANDLE || path.empty()) {
+        return 0;
+    }
+    std::filesystem::path resolved = path;
+    std::error_code ec;
+    if (!std::filesystem::exists(resolved, ec) && ProjectManager::HasActiveProject()) {
+        const std::filesystem::path inProj = ProjectManager::GetActiveProjectDir() / path;
+        if (std::filesystem::exists(inProj, ec)) {
+            resolved = inProj;
+        }
+    }
+    if (!std::filesystem::exists(resolved, ec)) {
+        const std::filesystem::path inAssets = PlatformPaths::ResolveAssetsDir() / path;
+        if (std::filesystem::exists(inAssets, ec)) {
+            resolved = inAssets;
+        }
+    }
+    ImageData img;
+    if (!ModelLoader::LoadImageRGBA(resolved, img) || img.pixels.empty()) {
+        return 0;
+    }
+    outWidth = img.width;
+    outHeight = img.height;
+    return CreateUITextureRGBA(img.width, img.height, img.pixels.data());
+}
+
+void VulkanRenderer::DestroyUITexture(uint64_t handle) {
+    const auto it = m_UITextures.find(handle);
+    if (it == m_UITextures.end()) {
+        return;
+    }
+    if (m_Device != VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(m_Device);
+    }
+    DestroyTexture(it->second);
+    m_UITextures.erase(it);
+}
+
 void VulkanRenderer::CreateBuiltinMeshes() {
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
@@ -1458,7 +1529,12 @@ void VulkanRenderer::InitImGui() {
     }
 
     if (!m_Headless) {
+#ifndef __ANDROID__
         ImGui_ImplGlfw_InitForVulkan(m_Window->GetNativeWindow(), true);
+#else
+        ImGuiIO& io = ImGui::GetIO();
+        io.DisplaySize = ImVec2(static_cast<float>(m_Extent.width), static_cast<float>(m_Extent.height));
+#endif
     }
 
     ImGui_ImplVulkan_InitInfo initInfo{};
@@ -1498,7 +1574,9 @@ void VulkanRenderer::ShutdownImGui() {
 
     ImGui_ImplVulkan_Shutdown();
     if (!m_Headless) {
+#ifndef __ANDROID__
         ImGui_ImplGlfw_Shutdown();
+#endif
     }
     ImGui::DestroyContext();
     m_ImGuiInitialized = false;
@@ -1518,6 +1596,7 @@ void VulkanRenderer::BeginImGuiFrame() {
     }
 
     ImGui_ImplVulkan_NewFrame();
+#ifndef __ANDROID__
     if (!m_Headless) {
         ImGui_ImplGlfw_NewFrame();
     } else {
@@ -1525,6 +1604,13 @@ void VulkanRenderer::BeginImGuiFrame() {
         io.DisplaySize = ImVec2(static_cast<float>(m_Extent.width), static_cast<float>(m_Extent.height));
         io.DeltaTime = 1.0f / 60.0f;
     }
+#else
+    {
+        ImGuiIO& io = ImGui::GetIO();
+        io.DisplaySize = ImVec2(static_cast<float>(m_Extent.width), static_cast<float>(m_Extent.height));
+        io.DeltaTime = 1.0f / 60.0f;
+    }
+#endif
 
     ImGui::NewFrame();
     ImGuizmo::BeginFrame();

@@ -1,6 +1,7 @@
 #include "panels/EditorPanels.hpp"
 
 #include "audio/AudioEngine.hpp"
+#include "core/InputMap.hpp"
 #include "core/Log.hpp"
 #include "core/PlatformPaths.hpp"
 #include "physics/PhysicsSystem.hpp"
@@ -12,6 +13,8 @@
 #include "scene/Scene.hpp"
 #include "scene/SceneSerializer.hpp"
 #include "scripting/ScriptEngine.hpp"
+#include "ui/TouchControlsOverlay.hpp"
+#include "ui/UISystem.hpp"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -671,6 +674,8 @@ void EditorPanels::StopPlayMode(Scene& scene) {
 #endif
 
     ScriptEngine::OnRuntimeStop(&scene);
+    UISystem::UnloadAllDocuments();
+    InputMap::ClearVirtualStates();
     m_IsPlaying = false;
     SceneSerializer::LoadFromFile(scene, ResolvePlaySnapshotPath());
     m_SelectedEntity = entt::null;
@@ -1022,6 +1027,7 @@ void EditorPanels::Render(
 
     RenderAssetImportModal(renderer, scene);
     RenderExportProjectModal();
+    RenderInputMapModal();
 
     const ImGuiIO& io = ImGui::GetIO();
     if (!m_IsPlaying &&
@@ -1674,6 +1680,10 @@ void EditorPanels::RenderMenuBar(Scene& scene, bool& shouldClose) {
         if (ImGui::MenuItem("Importar Asset Externo...")) {
             m_OpenAssetImportPopup = true;
         }
+        if (ImGui::MenuItem("Configuracion de Controles (Input Map)...")) {
+            m_ListeningActionName.clear();
+            m_OpenInputMapModal = true;
+        }
         if (ImGui::MenuItem("Exportar Juego (Standalone)...")) {
             std::string projFolder = "KymEngineGame";
             if (ProjectManager::HasActiveProject()) {
@@ -2071,6 +2081,16 @@ void EditorPanels::RenderViewport(VulkanRenderer* renderer, Scene& scene, Editor
         if (sceneDesc != VK_NULL_HANDLE && avail.x > 0.0f && avail.y > 0.0f) {
             ImGui::Image(reinterpret_cast<ImTextureID>(sceneDesc), avail);
             m_ViewportHovered = ImGui::IsItemHovered();
+
+            if (IsPlayingInProcess()) {
+                const ImVec2 imgMin = ImGui::GetItemRectMin();
+                const ImVec2 imgSize = ImGui::GetItemRectSize();
+                ImDrawList* dl = ImGui::GetWindowDrawList();
+                UISystem::UpdateAndRender(dl, imgMin, imgSize, m_ViewportHovered);
+                if (TouchControlsOverlay::ShouldShow(false)) {
+                    TouchControlsOverlay::RenderAndProcess(dl, imgMin, imgSize, m_ViewportHovered);
+                }
+            }
 
             if (m_ViewportHovered) {
                 m_ScrollDelta += ImGui::GetIO().MouseWheel;
@@ -3501,18 +3521,20 @@ void EditorPanels::RenderExportProjectModal() {
         return;
     }
 
-    const char* platforms[] = {"Windows (x64)", "Linux (x64)"};
-    if (ImGui::Combo("Plataforma destino", &m_ExportPlatformIdx, platforms, 2)) {
-        const char* platDir = (m_ExportPlatformIdx == 0) ? "windows-x64" : "linux-x64";
+    const char* platforms[] = {"Windows (x64)", "Linux (x64)", "Android (.apk)"};
+    if (ImGui::Combo("Plataforma destino", &m_ExportPlatformIdx, platforms, 3)) {
+        const char* platDir = "linux-x64";
+        if (m_ExportPlatformIdx == 0) platDir = "windows-x64";
+        else if (m_ExportPlatformIdx == 2) platDir = "android-apk";
         const std::filesystem::path defaultOut = ProjectManager::GetActiveProjectDir() / "exports" / platDir;
         const std::string outUtf8 = PlatformPaths::PathToUtf8(defaultOut);
         std::strncpy(m_ExportOutputDir, outUtf8.c_str(), sizeof(m_ExportOutputDir) - 1);
         m_ExportOutputDir[sizeof(m_ExportOutputDir) - 1] = '\0';
     }
 
-    const ExportPlatform targetPlat = (m_ExportPlatformIdx == 0)
-        ? ExportPlatform::WindowsX64
-        : ExportPlatform::LinuxX64;
+    ExportPlatform targetPlat = ExportPlatform::LinuxX64;
+    if (m_ExportPlatformIdx == 0) targetPlat = ExportPlatform::WindowsX64;
+    else if (m_ExportPlatformIdx == 2) targetPlat = ExportPlatform::AndroidAPK;
     if (ProjectManager::HasExportTemplate(targetPlat)) {
         ImGui::TextColored(ImVec4(0.35f, 0.88f, 0.45f, 1.0f), "Plantilla de exportacion lista localmente.");
     } else {
@@ -3563,6 +3585,162 @@ void EditorPanels::RenderExportProjectModal() {
         ImGui::CloseCurrentPopup();
     }
     ImGui::EndDisabled();
+
+    ImGui::EndPopup();
+}
+
+void EditorPanels::RenderInputMapModal() {
+    if (m_OpenInputMapModal) {
+        ImGui::OpenPopup("Configuracion de Controles (Input Map)");
+        m_OpenInputMapModal = false;
+    }
+    if (!ImGui::BeginPopupModal("Configuracion de Controles (Input Map)", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        return;
+    }
+
+    // Listen for key/mouse press when assigning a new binding
+    if (!m_ListeningActionName.empty()) {
+        GLFWwindow* win = glfwGetCurrentContext();
+        if (win) {
+            if (glfwGetKey(win, GLFW_KEY_ESCAPE) == GLFW_PRESS) {
+                m_ListeningActionName.clear();
+            } else {
+                bool assigned = false;
+                for (int key : InputMap::GetListenKeyCandidates()) {
+                    if (glfwGetKey(win, key) == GLFW_PRESS) {
+                        InputMap::AddBinding(m_ListeningActionName, {InputDeviceType::Key, key});
+                        m_ListeningActionName.clear();
+                        assigned = true;
+                        break;
+                    }
+                }
+                if (!assigned) {
+                    const int mouseBtns[] = {GLFW_MOUSE_BUTTON_LEFT, GLFW_MOUSE_BUTTON_RIGHT, GLFW_MOUSE_BUTTON_MIDDLE};
+                    for (int mb : mouseBtns) {
+                        if (glfwGetMouseButton(win, mb) == GLFW_PRESS) {
+                            InputMap::AddBinding(m_ListeningActionName, {InputDeviceType::MouseButton, mb});
+                            m_ListeningActionName.clear();
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    ImGui::TextUnformatted("Acciones del Input Map (llamalas en Java con Input.isActionPressed(\"nombre\"))");
+    ImGui::Separator();
+
+    ImGui::SetNextItemWidth(220.0f);
+    ImGui::InputText("##NewActionName", m_NewActionName, sizeof(m_NewActionName));
+    ImGui::SameLine();
+    if (ImGui::Button("+ Nueva Accion") && m_NewActionName[0] != '\0') {
+        InputMap::SetActionBindings(m_NewActionName, {});
+        m_NewActionName[0] = '\0';
+    }
+    ImGui::Spacing();
+
+    const auto& actions = InputMap::GetAllActions();
+    std::vector<std::string> sortedNames;
+    sortedNames.reserve(actions.size());
+    for (const auto& [name, _] : actions) {
+        sortedNames.push_back(name);
+    }
+    std::sort(sortedNames.begin(), sortedNames.end());
+
+    std::string actionToRemove;
+    if (ImGui::BeginTable("##InputMapTable", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_ScrollY, ImVec2(640.0f, 240.0f))) {
+        ImGui::TableSetupColumn("Accion", ImGuiTableColumnFlags_WidthFixed, 160.0f);
+        ImGui::TableSetupColumn("Teclas / Botones", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Opciones", ImGuiTableColumnFlags_WidthFixed, 190.0f);
+        ImGui::TableHeadersRow();
+
+        for (const std::string& name : sortedNames) {
+            const auto& bindings = actions.at(name);
+            ImGui::PushID(name.c_str());
+            ImGui::TableNextRow();
+
+            ImGui::TableSetColumnIndex(0);
+            ImGui::TextUnformatted(name.c_str());
+
+            ImGui::TableSetColumnIndex(1);
+            if (bindings.empty()) {
+                ImGui::TextDisabled("(sin asignar)");
+            } else {
+                std::string joined;
+                for (size_t i = 0; i < bindings.size(); ++i) {
+                    if (i > 0) joined += ", ";
+                    joined += InputMap::BindingToString(bindings[i]);
+                }
+                ImGui::TextWrapped("%s", joined.c_str());
+            }
+
+            ImGui::TableSetColumnIndex(2);
+            const bool isListening = (m_ListeningActionName == name);
+            if (ImGui::Button(isListening ? "Pulsa tecla..." : "+ Asignar")) {
+                m_ListeningActionName = isListening ? "" : name;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Limpiar")) {
+                InputMap::SetActionBindings(name, {});
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("X")) {
+                actionToRemove = name;
+            }
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+    if (!actionToRemove.empty()) {
+        InputMap::RemoveAction(actionToRemove);
+    }
+
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::TextUnformatted("Controles Tactiles en Pantalla (Movil / Simulacion PC)");
+    TouchControlsConfig& tc = TouchControlsOverlay::GetConfig();
+    ImGui::Checkbox("Activar controles tactiles en Android/Movil", &tc.enabledOnMobile);
+    ImGui::Checkbox("Simular controles tactiles en PC (Viewport)", &tc.simulateInEditor);
+
+    char bufA[64]{};
+    char bufALbl[16]{};
+    char bufB[64]{};
+    char bufBLbl[16]{};
+    std::strncpy(bufA, tc.buttonAAction.c_str(), sizeof(bufA) - 1);
+    std::strncpy(bufALbl, tc.buttonALabel.c_str(), sizeof(bufALbl) - 1);
+    std::strncpy(bufB, tc.buttonBAction.c_str(), sizeof(bufB) - 1);
+    std::strncpy(bufBLbl, tc.buttonBLabel.c_str(), sizeof(bufBLbl) - 1);
+
+    ImGui::SetNextItemWidth(160.0f);
+    if (ImGui::InputText("Accion Boton A", bufA, sizeof(bufA))) tc.buttonAAction = bufA;
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(60.0f);
+    if (ImGui::InputText("Etiqueta A", bufALbl, sizeof(bufALbl))) tc.buttonALabel = bufALbl;
+
+    ImGui::SetNextItemWidth(160.0f);
+    if (ImGui::InputText("Accion Boton B", bufB, sizeof(bufB))) tc.buttonBAction = bufB;
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(60.0f);
+    if (ImGui::InputText("Etiqueta B", bufBLbl, sizeof(bufBLbl))) tc.buttonBLabel = bufBLbl;
+
+    ImGui::SliderFloat("Opacidad controles", &tc.opacity, 0.2f, 1.0f);
+
+    ImGui::Spacing();
+    if (ImGui::Button("Guardar Controles", ImVec2(160.0f, 0.0f))) {
+        if (ProjectManager::HasActiveProject()) {
+            const std::filesystem::path projDir = ProjectManager::GetActiveProjectDir();
+            InputMap::SaveToProject(projDir);
+            TouchControlsOverlay::SaveToProject(projDir);
+        }
+        m_ListeningActionName.clear();
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Cerrar", ImVec2(100.0f, 0.0f))) {
+        m_ListeningActionName.clear();
+        ImGui::CloseCurrentPopup();
+    }
 
     ImGui::EndPopup();
 }

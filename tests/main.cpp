@@ -1,4 +1,5 @@
 #include "audio/AudioEngine.hpp"
+#include "core/InputMap.hpp"
 #include "core/Log.hpp"
 #include "core/Timestep.hpp"
 #include "physics/PhysicsSystem.hpp"
@@ -8,6 +9,8 @@
 #include "scene/Scene.hpp"
 #include "scene/SceneSerializer.hpp"
 #include "scripting/ScriptEngine.hpp"
+#include "ui/TouchControlsOverlay.hpp"
+#include "ui/UISystem.hpp"
 
 #include <array>
 #include <cmath>
@@ -433,6 +436,65 @@ void TestKinematicCollisionResolution() {
 
 } // namespace
 
+void TestInputMapAndTouchControls() {
+    const std::filesystem::path tmpDir = std::filesystem::temp_directory_path() / "kyumist_test_inputmap";
+    std::error_code ec;
+    std::filesystem::remove_all(tmpDir, ec);
+    std::filesystem::create_directories(tmpDir, ec);
+
+    Kyumist::InputMap::InitDefaults();
+    Kyumist::InputMap::SetActionBindings("dash", {{Kyumist::InputDeviceType::Key, 340}});
+    Require(Kyumist::InputMap::SaveToProject(tmpDir), "InputMap should save input_map.json");
+
+    Kyumist::InputMap::RemoveAction("dash");
+    Require(Kyumist::InputMap::LoadFromProject(tmpDir), "InputMap should load input_map.json");
+    Require(Kyumist::InputMap::GetAllActions().count("dash") == 1, "Loaded InputMap should contain dash");
+
+    Kyumist::InputMap::ClearVirtualStates();
+    Kyumist::InputMap::Update(nullptr);
+    Require(!Kyumist::InputMap::IsActionPressed("dash"), "dash should not be pressed initially");
+
+    Kyumist::InputMap::SetVirtualActionState("dash", true);
+    Kyumist::InputMap::Update(nullptr);
+    Require(Kyumist::InputMap::IsActionPressed("dash"), "dash should be pressed");
+    Require(Kyumist::InputMap::IsActionJustPressed("dash"), "dash should be just pressed on frame 1");
+
+    Kyumist::InputMap::Update(nullptr);
+    Require(!Kyumist::InputMap::IsActionJustPressed("dash"), "dash should not be just pressed on frame 2");
+
+    Kyumist::InputMap::SetVirtualActionState("dash", false);
+    Kyumist::InputMap::Update(nullptr);
+    Require(Kyumist::InputMap::IsActionJustReleased("dash"), "dash should be just released");
+
+    std::filesystem::remove_all(tmpDir, ec);
+    std::cout << "[PASS] TestInputMapAndTouchControls\n";
+}
+
+void TestRmlUiHtmlCssDocument() {
+    const std::filesystem::path tmpDir = std::filesystem::temp_directory_path() / "kyumist_test_rmlui";
+    std::error_code ec;
+    std::filesystem::remove_all(tmpDir, ec);
+    std::filesystem::create_directories(tmpDir, ec);
+
+    const std::filesystem::path htmlPath = tmpDir / "hud.html";
+    {
+        std::ofstream out(htmlPath);
+        out << "<rml><head><style>body { font-family: Roboto; width: 100%; height: 100%; display: flex; }</style></head>"
+            << "<body><div id=\"hp\">HP: 100</div><button id=\"btn_start\">Play</button></body></rml>\n";
+    }
+
+    Kyumist::UISystem::Init(nullptr);
+    Require(Kyumist::UISystem::IsInitialized(), "UISystem should initialize in headless mode");
+    Require(Kyumist::UISystem::LoadDocument(htmlPath.string()), "UISystem should load HTML+CSS document");
+    Require(Kyumist::UISystem::SetText("hp", "HP: 80"), "UISystem should update text by element id");
+    Require(Kyumist::UISystem::SetVisible("btn_start", false), "UISystem should toggle visibility by element id");
+    Kyumist::UISystem::UpdateAndRender(nullptr, ImVec2(0, 0), ImVec2(1280, 720), false);
+    Kyumist::UISystem::Shutdown();
+
+    std::filesystem::remove_all(tmpDir, ec);
+    std::cout << "[PASS] TestRmlUiHtmlCssDocument\n";
+}
+
 int main() {
     Kyumist::Log::Init();
 
@@ -445,6 +507,8 @@ int main() {
     TestFullEngineCapabilities();
     TestInMemoryUndoRedoSerialization();
     TestKinematicCollisionResolution();
+    TestInputMapAndTouchControls();
+    TestRmlUiHtmlCssDocument();
 
     if (g_Failures > 0) {
         std::cerr << g_Failures << " test(s) failed.\n";

@@ -29,6 +29,10 @@ public:
     static void OnRuntimeUpdate(Scene* scene, Timestep ts);
     static void OnRuntimeStop(Scene* scene);
     static void NotifyCollision(Scene* scene, entt::entity self, entt::entity other);
+    static void NotifyUIEvent(const std::string& elementId, const std::string& eventType);
+
+    static bool HasPendingSceneLoad();
+    static std::string ConsumePendingSceneLoad();
 
     static std::vector<std::string> GetAvailableScriptNames();
     static bool IsInitialized();
